@@ -2,13 +2,21 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const range = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+const runnerSettings = p => range(p.paceMinutesPerKilometre, 0.1, 60) && Number.isInteger(p.spawnLane) && range(p.spawnLane, 1, 8) && range(p.distanceBehindStartLine, 0, 1000);
 export const commands = {
+    'runner.create': runnerSettings,
+    'runner.remove': p => Object.keys(p).length === 0,
+    'runner.configure': runnerSettings,
+    'run.start': runnerSettings,
+    'run.pause': p => Object.keys(p).length === 0,
+    'run.resume': p => Object.keys(p).length === 0,
+    'run.reset': p => Object.keys(p).length === 0,
     'runner.pace': p => range(p.paceMinutesPerKilometre, 0.1, 60),
     'runner.spawn': p => Number.isInteger(p.spawnLane) && range(p.spawnLane, 1, 8) && range(p.distanceBehindStartLine, 0, 1000),
     'tracking.configure': p => range(p.markerLength, 0.001, 10) && range(p.startupTimeoutSeconds, 1, 300) && Number.isInteger(p.maxTrackedMarkers) && range(p.maxTrackedMarkers, 1, 64),
@@ -18,7 +26,7 @@ export const commands = {
     'tracking.retry': p => Object.keys(p).length === 0
 };
 
-export function createService({ token = '', commandTimeout = 8000, staleTimeout = 5000 } = {}) {
+export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {}) {
     let headset = null, state = null, updatedAt = 0;
     const dashboards = new Set(), pending = new Map();
     const send = (ws, message) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)); };
@@ -48,7 +56,7 @@ export function createService({ token = '', commandTimeout = 8000, staleTimeout 
     server.on('upgrade', (req, socket, head) => {
         try {
             const host = new URL(`http://${req.headers.host}`).hostname;
-            if (!token && !['localhost', '127.0.0.1', '[::1]'].includes(host)) return socket.destroy();
+
             if (new URL(req.url, 'http://localhost').pathname !== '/ws') return socket.destroy();
             if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return socket.destroy();
             wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws));
@@ -69,8 +77,6 @@ export function createService({ token = '', commandTimeout = 8000, staleTimeout 
                 const m = JSON.parse(raw.toString());
                 if (!object(m)) throw new Error('JSON object required');
                 if (!role) {
-                    const supplied = Buffer.from(typeof m.token === 'string' ? m.token : ''), expected = Buffer.from(token);
-                    if (token && (supplied.length !== expected.length || !timingSafeEqual(supplied, expected))) { ws.close(1008, 'Invalid access token'); return; }
                     if (m.type !== 'hello' || m.protocol !== 1 || !['headset', 'dashboard'].includes(m.role)) throw new Error('Protocol 1 hello required');
                     if (m.role === 'headset' && headset?.readyState === WebSocket.OPEN) { ws.close(1008, 'A headset is already connected'); return; }
                     clearTimeout(helloTimer); role = m.role;
@@ -88,6 +94,8 @@ export function createService({ token = '', commandTimeout = 8000, staleTimeout 
                 if (!Object.hasOwn(commands, m.commandType) || !object(m.payload) || !commands[m.commandType](m.payload)) return reject('Ungültiger Befehl oder Wert.');
                 if (headset?.readyState !== WebSocket.OPEN) return reject('Keine Brille verbunden.');
                 if (!updatedAt || Date.now() - updatedAt > staleTimeout) return reject('App-Status veraltet.');
+                if ((m.commandType.startsWith('run.') || m.commandType === 'runner.configure') && state.runnerControlVersion !== 1) return reject('Die App unterstützt die neue Laufsteuerung noch nicht. Bitte neu bauen und installieren.');
+                if (['runner.create', 'runner.remove'].includes(m.commandType) && (state.spawnControlVersion !== 1 || state.testScene !== true)) return reject('Spawnen ist nur in der verbundenen Unity-Testszene verfügbar.');
                 if (pending.size) return reject('Ein Befehl wartet auf Bestätigung.');
                 const commandId = randomUUID();
                 const timer = setTimeout(() => finish(commandId, false, 'Keine Bestätigung. Zustand prüfen; Befehl wird nicht wiederholt.'), commandTimeout);
@@ -104,12 +112,16 @@ export function createService({ token = '', commandTimeout = 8000, staleTimeout 
             }
         });
     });
+    // Application-level liveness lets Unity pause a run even when a broken link stays half-open.
+    const controlHeartbeat = setInterval(() => send(headset, { type: 'control', protocol: 1 }), 1000);
+    controlHeartbeat.unref();
     const heartbeat = setInterval(() => {
         for (const ws of wss.clients) { if (!ws.alive) ws.terminate(); else { ws.alive = false; ws.ping(); } }
     }, 10000);
     heartbeat.unref();
     return { server, close: async () => {
         clearInterval(heartbeat);
+        clearInterval(controlHeartbeat);
         for (const item of pending.values()) clearTimeout(item.timer);
         pending.clear();
         for (const ws of wss.clients) ws.terminate();
@@ -118,10 +130,9 @@ export function createService({ token = '', commandTimeout = 8000, staleTimeout 
     } };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-    const host = process.env.HOST || '127.0.0.1', port = Number(process.env.PORT || 8787), token = process.env.ACCESS_TOKEN || '';
-    if (!['127.0.0.1', 'localhost', '::1'].includes(host) && token.length < 16) throw new Error('LAN mode requires ACCESS_TOKEN with at least 16 characters.');
+    const host = process.env.HOST || '0.0.0.0', port = Number(process.env.PORT || 8787);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT');
-    const service = createService({ token });
+    const service = createService();
     service.server.on('error', error => { console.error(error.message); process.exitCode = 1; });
     service.server.listen(port, host, () => console.log(`PaceScape: http://localhost:${port}\nWebSocket: ws://localhost:${port}/ws\nUSB: adb reverse tcp:${port} tcp:${port}`));
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await service.close(); });

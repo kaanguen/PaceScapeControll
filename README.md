@@ -26,9 +26,9 @@
 
 | 🏃 Tempo einstellen | 🛤️ Platzierung steuern | 🥽 App im Blick |
 | :---: | :---: | :---: |
-| Die Zielpace live für platzierte Objekte ändern. | Spur und Startabstand für neue Platzierungen wählen. | Trackingphase, Marker und Meldungen direkt sehen. |
+| Pace, Spur und Startposition gemeinsam einstellen. | Platzierten Läufer bewusst starten, pausieren und zurücksetzen. | Trackingphase, Marker und Meldungen direkt sehen. |
 
-Das Dashboard nutzt ein schlichtes Dark-Mode-Design mit türkisfarbenen Akzenten, Seitenleiste und schematischer Laufbahnübersicht. Die Grafik zeigt die bestätigte Spur für neue Platzierungen; sie ist keine Live-Positionsmessung.
+Das Dashboard nutzt ein schlichtes Dark-Mode-Design mit türkisfarbenen Akzenten, Seitenleiste und schematischer Laufbahnübersicht. Die Grafik zeigt die bestätigte Laufspur; sie ist keine Live-Positionsmessung.
 
 <details>
   <summary>Dashboard ansehen</summary>
@@ -41,11 +41,23 @@ Das Dashboard nutzt ein schlichtes Dark-Mode-Design mit türkisfarbenen Akzenten
 
 **Die lokale Steuerung ist implementiert. Die Prüfung mit der echten Brille steht noch aus.**
 
-- **Implementiert:** Lokaler HTTP-/WebSocket-Server, deutsches Dashboard, Live-Pace, Spur und Startabstand für neue Platzierungen, Tracking starten/stoppen/neu platzieren sowie Erkennungs- und Bodeneinstellungen.
+- **Implementiert:** Lokaler HTTP-/WebSocket-Server, deutsches Dashboard, explizites Laufstarten, Pause/Weiterlaufen und Zurücksetzen, gemeinsame Pace-/Spur-/Startabstand-Einstellungen, Tracking starten/stoppen/neu platzieren sowie Erkennungs- und Bodeneinstellungen.
 - **App-Anbindung:** Die passende Unity-Anbindung liegt im PaceScape-Projekt unter `Assets/Scripts/RemoteControl/`. Ein erfolgreicher Befehl wird erst nach Bestätigung der App angezeigt; ein Tracking-Start muss anschließend über die Statusmeldungen beurteilt werden.
-- **Geprüft:** Acht Server-Integrationstests bestanden; Pace und Startposition im Browser mit der Test-Brille bestätigt.
+- **Geprüft:** 13 Server-/Simulatortests bestanden; Start mit gemeinsamen Einstellungen, Pause, Pace-Änderung, Weiterlaufen und Zurücksetzen im Browser mit der Test-Brille bestätigt.
 - **In Prüfung:** Unity-Kompilierung, Unity-Tests und die Verbindung sowie tatsächliche Wirkung auf Magic Leap 2. Für die App-Anbindung ist ein neuer Geräte-Build nötig.
 - **Noch nicht vorhanden:** BLE-, Laufband-, Herzfrequenz-, Trainingsplan- und Live-Messdatenfunktionen.
+
+## So steuerst du den Lauf
+
+1. **Verbinden und platzieren:** Die aktualisierte App mit dem Server verbinden und Marker/Boden erfassen. Die Erkennung startet mit der App, der platzierte Läufer bleibt stehen.
+2. **Läufer einstellen:** Pace, Spur und Startabstand gemeinsam übernehmen. Im wartenden Zustand werden bereits platzierte Objekte direkt angepasst.
+3. **Lauf starten:** Startet nur bei vollständig getrackten Platzierungen und übernimmt auch noch nicht gespeicherte Läufereingaben gemeinsam. Ohne Platzierung wird kein späterer automatischer Start vorgemerkt.
+4. **Pause / Weiterlaufen:** Hält die Position und setzt dort fort. Weiterlaufen nutzt die bestätigten Einstellungen; Pace-Änderungen vorher mit „Läufer einstellen“ übernehmen.
+5. **Zurücksetzen:** Beendet den Lauf und stellt die eingestellte Startposition wieder her. Strecke und Anker bleiben erhalten. Danach lassen sich Spur und Startabstand wieder ändern.
+
+Die Pace bleibt im Lauf veränderbar. Spur- und Startabstandsänderungen erfordern zuerst Zurücksetzen. Trackingverlust, Hintergrundwechsel oder verlorene Serververbindung pausieren einen laufenden Lauf; nach Wiederherstellung ist bewusstes Weiterlaufen nötig. Neue Markerplatzierungen warten bis zum nächsten Ready-Zustand. Alle platzierten Objekte teilen denselben Laufzustand.
+
+**Tracking stoppen / Neu platzieren** löscht dagegen die lokalen Platzierungen und setzt den Lauf zurück. Ein geschlossenes Browser-Tab pausiert den Lauf nicht, solange App und Server verbunden bleiben.
 
 ## Schnellstart
 
@@ -56,7 +68,7 @@ npm ci
 npm start
 ```
 
-Die Website unter **[localhost:8787](http://localhost:8787)** öffnen. Der Server läuft standardmäßig nur auf diesem Rechner; Website und App verbinden sich über WebSockets.
+Die Website unter **[localhost:8787](http://localhost:8787)** öffnen. Der Server ist standardmäßig im lokalen Netz erreichbar; Website und App verbinden sich über WebSockets.
 
 Für die Brille per USB: aktualisierte PaceScape-App installieren, USB-Debugging freigeben und bei verfügbarem ADB die Weiterleitung setzen:
 
@@ -68,7 +80,7 @@ Danach die App starten. Sie verwendet standardmäßig `ws://127.0.0.1:8787/ws`. 
 
 **Ohne Brille ausprobieren:** In einem zweiten Terminal `npm run simulate` starten. Die Test-Brille ist im Dashboard als Simulation gekennzeichnet und muss vor dem Verbinden des echten Geräts beendet werden. `npm test` führt die Server-Tests aus; Strg+C beendet den jeweiligen Prozess.
 
-USB-Einrichtung, optionaler WLAN-Betrieb mit Zugriffsschlüssel und Fehlerverhalten sind in der **[Einrichtungsanleitung](docs/setup.md)** beschrieben. Lokales `ws://` ist unverschlüsselt; für WLAN ein vertrauenswürdiges Netz ohne öffentliche Portfreigabe verwenden.
+USB-Einrichtung, WLAN-Betrieb ohne Zugriffsschlüssel und Fehlerverhalten sind in der **[Einrichtungsanleitung](docs/setup.md)** beschrieben. Lokales `ws://` ist unverschlüsselt; für WLAN ein vertrauenswürdiges Netz ohne öffentliche Portfreigabe verwenden.
 
 ---
 
@@ -76,3 +88,8 @@ USB-Einrichtung, optionaler WLAN-Betrieb mit Zugriffsschlüssel und Fehlerverhal
   <a href="docs/setup.md">Einrichtung &amp; Geräteprüfung</a> &nbsp;·&nbsp;
   <a href="PROTOCOL.md">WebSocket-Protokoll</a>
 </p>
+
+
+## Verbindung ohne Zugriffsschlüssel
+
+Der Server lauscht jetzt standardmäßig auf `0.0.0.0:8787` und akzeptiert App und Dashboard ohne Zugriffsschlüssel. `npm start` genügt. Die App verwendet `ws://RECHNER-IP:8787/ws`; ein eventuell noch gesendeter alter Schlüssel wird ignoriert. `ACCESS_TOKEN` hat keine Wirkung mehr. Die lokale IP muss vom Gerät erreichbar sein. Alle Teilnehmer im erreichbaren lokalen Netz können die App steuern; den Port nicht öffentlich freigeben. Frühere Angaben zur verpflichtenden Schlüsselprüfung gelten nicht mehr.

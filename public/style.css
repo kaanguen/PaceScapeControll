@@ -232,3 +232,38 @@ input, select { font-size: 13px; }
     .metric-label { font-size: 9px; }
     .page-heading p:last-child { font-size: 12px; }
 }
+
+/* Run controls share the confirmed Unity state with the runner configuration form. */
+.run-panel { margin-top: 18px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.run-summary { flex: 1; min-width: 0; }
+.run-summary h2 { display: inline-block; margin-right: 12px; }
+.run-summary .eyebrow { margin-bottom: 8px; }
+.run-summary .help { max-width: 540px; }
+#runControls { display: flex; gap: 10px; flex: none; }
+#runControls button { width: auto; min-width: 105px; padding-left: 16px; padding-right: 16px; }
+.runner-config { grid-column: span 2; }
+.runner-fields { display: grid; grid-template-columns: 1.2fr .65fr 1.2fr; align-items: end; gap: 14px; }
+.runner-fields #paceInput { min-height: 42px; font-size: 18px; padding-top: 9px; padding-bottom: 9px; }
+.runner-config button { max-width: 230px; }
+input:disabled, select:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 1180px) {
+    .run-panel { align-items: flex-start; flex-direction: column; gap: 16px; }
+    .control-grid { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
+    .runner-config { grid-column: auto; }
+    .control-card:last-child { grid-column: auto; }
+    .control-card:last-child fieldset { display: block; }
+    #retryTracking { width: 100%; margin-top: 9px; }
+    .runner-fields { grid-template-columns: 1fr 1fr; }
+    .runner-fields label:first-child { grid-column: 1 / -1; }
+}
+@media (max-width: 740px) {
+    .control-grid { grid-template-columns: 1fr; }
+    #runControls { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+    #runControls button { width: 100%; min-width: 0; }
+    #startRun { grid-column: 1 / -1; }
+    .runner-config button { max-width: none; }
+}
+
+.run-actions { display: flex; flex-direction: column; gap: 8px; }
+#spawnControls { display: flex; gap: 10px; }
+#spawnControls button { flex: 1; }

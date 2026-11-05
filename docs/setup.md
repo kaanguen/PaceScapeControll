@@ -25,17 +25,17 @@ Mit Strg+C beenden. `npm test` prüft den Server. `npm run simulate` startet in 
 3. `adb reverse tcp:8787 tcp:8787` ausführen. Die Regel nach einem Neustart oder erneutem Anschließen gegebenenfalls wieder setzen. Bei mehreren Geräten `adb -s GERÄTESERIENNUMMER reverse tcp:8787 tcp:8787` verwenden.
 4. Die App starten und die Website am Rechner öffnen. Die App verbindet sich mit `ws://127.0.0.1:8787/ws`. Ohne USB-Weiterleitung bedeutet localhost auf der Brille die Brille selbst.
 
-Der Server bindet standardmäßig nur an `127.0.0.1`. Website und App stellen jeweils eine WebSocket-Verbindung zu diesem Server her. Eine Brille und mehrere Dashboards werden unterstützt. Die Website sendet alle Steuerbefehle über WebSocket.
+Der Server bindet standardmäßig an `0.0.0.0` und ist über die lokale Rechner-IP erreichbar. Website und App stellen jeweils eine WebSocket-Verbindung zu diesem Server her. Eine Brille und mehrere Dashboards werden unterstützt. Die Website sendet alle Steuerbefehle über WebSocket.
 
 ## Optional im lokalen WLAN
 
 Rechner und Brille müssen einander erreichen können. Server bewusst für das LAN starten:
 
 ```sh
-HOST=0.0.0.0 ACCESS_TOKEN='hier-eigenen-zufälligen-schlüssel-einsetzen' npm start
+npm start
 ```
 
-Für LAN-Bindung sind mindestens 16 Zeichen erforderlich. Den gleichen Schlüssel auf der Website unter „Lokale Verbindung“ eingeben und „Neu verbinden“ wählen. Er bleibt nur im Arbeitsspeicher des Tabs.
+Für die Verbindung über die lokale Rechner-IP ist kein Zugriffsschlüssel nötig. Der Server ist standardmäßig im lokalen Netz erreichbar.
 
 Die App liest beim Start optional `pacescape-control.json` aus `Application.persistentDataPath`:
 
@@ -43,7 +43,7 @@ Die App liest beim Start optional `pacescape-control.json` aus `Application.pers
 {
   "Enabled": true,
   "ServerUrl": "ws://192.168.1.42:8787/ws",
-  "AccessToken": "hier-eigenen-zufälligen-schlüssel-einsetzen"
+  "AccessToken": ""
 }
 ```
 
@@ -64,8 +64,10 @@ Dann die App neu starten. Ohne Datei gelten die USB-Standardwerte. Mit `{"Enable
 
 | Funktion | Wirkung |
 | --- | --- |
-| Pace als `6:30` | 6,5 Minuten/km; wirkt live auf bestehende und zukünftige Objekte |
-| Spur 1–8, Abstand hinter Startlinie | Gilt nur für neue Markerplatzierungen; vorhandene Objekte bleiben auf ihrer bisherigen Bahn |
+| Läufer einstellen | Pace, Spur und Startabstand werden gemeinsam validiert und übernommen; Pace wirkt live, die Position lässt sich nur im wartenden Ready-Zustand ändern |
+| Lauf starten | Übernimmt die aktuellen drei Läufereingaben gemeinsam und startet erst bei vollständig sichtbaren, getrackten Platzierungen |
+| Pause / Weiterlaufen | Hält und setzt die vorhandenen Positionen fort; Weiterlaufen übernimmt keine ungespeicherten Eingaben |
+| Zurücksetzen | Beendet den Lauf, stellt die Startposition wieder her und behält Anker und Strecke |
 | Tracking starten | Aktiviert den Tracker; bedeutet Start angefordert, nicht schon bereit |
 | Tracking stoppen | Deaktiviert den Tracker und löscht lokale Platzierungen |
 | Tracking neu starten | Löscht Platzierungen und startet die Erkennung neu |
@@ -84,9 +86,10 @@ Keine BLE-, Laufband-, Herzfrequenz-, Trainingsplan- oder Messdatenfunktionen: D
 - Statusübertragung ungefähr einmal pro Sekunde; bei über fünf Sekunden altem Status sind Befehle gesperrt.
 - Jeder Befehl erhält eine ID. Erfolg wird erst nach App-Bestätigung angezeigt. Befehle werden nicht automatisch wiederholt oder beim Wiederverbinden nachgeholt.
 - Genau ein Befehl kann gleichzeitig auf Bestätigung warten. Nach acht Sekunden meldet der Server eine Zeitüberschreitung; bei Abbruch ist eine bereits begonnene Ausführung eventuell unklar. Vor erneutem Senden den aktuellen Zustand prüfen.
+- Tracking- oder Serververbindungsverlust pausiert einen laufenden Lauf. Sichtbarkeit und Verbindung können sich erholen, der Lauf setzt sich erst nach Weiterlaufen fort. Der Server sendet jede Sekunde ein Lebenszeichen; nach sechs Sekunden ohne aktuelles Lebenszeichen pausiert die App und verbindet sich neu. Das Schließen nur des Browser-Tabs pausiert den Lauf nicht.
 - Unity wendet Befehle auf dem Hauptthread an; ein dort länger als drei Sekunden wartender Befehl wird verworfen. Hintergrundwechsel trennt die Verbindung; die App verbindet sich nach Rückkehr erneut. Tracking-Pause und Sichtbarkeit bleiben unter Kontrolle der bestehenden XR-Lebenszykluslogik.
 - Beide Seiten verbinden sich nach Netzwerkfehlern erneut. Browser-Ablehnung wegen eines falschen Schlüssels erfordert bewusstes Neuverbinden. Änderungen an der App-Verbindungsdatei erfordern einen App-Neustart.
-- WebSocket-Nachrichten sind auf 16 KiB und 30 Nachrichten pro Sekunde pro Verbindung begrenzt. Fremde Browser-Ursprünge werden abgewiesen; LAN erfordert den gemeinsamen Schlüssel.
+- WebSocket-Nachrichten sind auf 16 KiB und 30 Nachrichten pro Sekunde pro Verbindung begrenzt. Fremde Browser-Ursprünge werden abgewiesen; ein Zugriffsschlüssel wird nicht benötigt.
 
 ## Dateien und Prüfung
 
@@ -94,7 +97,22 @@ Keine BLE-, Laufband-, Herzfrequenz-, Trainingsplan- oder Messdatenfunktionen: D
 - `public/`: Dashboard ohne Build-Schritt und ohne externe Ressourcen.
 - `scripts/simulate-headset.js`: getrennt gekennzeichnete Test-Brille.
 - `test/service.test.js`: echte lokale HTTP-/WebSocket-Integrationstests.
-- `PROTOCOL.md`: JSON-Vertrag für die App.
+- [`PROTOCOL.md`](../PROTOCOL.md): JSON-Vertrag für die App.
 - Unity: `PaceScape/Assets/Scripts/RemoteControl/` im bestehenden PaceScape-Repository, kleine geprüfte Zugriffsmethoden an `TagTracker` und `MarkerPlanePlacement` sowie Android-Manifest-Erweiterung.
 
-Server-Tests ersetzen keine Unity-Kompilierung, Editor-Tests oder Geräteprüfung. `PaceScape.Tracking.EditorTests` inklusive `RemoteControlTests` im Unity Test Runner ausführen. Auf der Brille Pace, Spur/Offset für neue Platzierungen, Tracking-Neustart, Berechtigungsfehler, WLAN-/USB-Abbruch und Pause/Rückkehr mit einem neuen Build prüfen.
+Server-Tests ersetzen keine Unity-Kompilierung, Editor-Tests oder Geräteprüfung. `PaceScape.Tracking.EditorTests` inklusive `RemoteControlTests` und `RunControlTests` im Unity Test Runner ausführen. Auf der Brille Pace, Spur/Offset für neue Platzierungen, Tracking-Neustart, Berechtigungsfehler, WLAN-/USB-Abbruch und Pause/Rückkehr mit einem neuen Build prüfen.
+
+## Explizite Laufsteuerung
+
+Der Läufer läuft nach der Platzierung nicht mehr automatisch los. Die Erkennung startet weiterhin mit der App. Erst „Lauf starten“ setzt alle aktuellen Läufer in Bewegung. Marker und Boden müssen dafür vollständig getrackt sein. Laufzustände sind `Ready`, `Running` und `Paused`; der Status allein ersetzt nicht die separate Platzierungsbereitschaft.
+
+Pace, Spur und Startabstand werden mit „Läufer einstellen“ oder beim Start in einem gemeinsamen Befehl gesetzt. Bestehende wartende Objekte werden an den gewählten Start gesetzt. Während Running oder Paused sind Positionsänderungen gesperrt; die Pace bleibt veränderbar. Zurücksetzen hält die Strecke/Anker und erlaubt erneut Positionsänderungen. Tracking-Neustarts löschen dagegen die Platzierungen. Neue Marker werden während Running/Paused vorgemerkt und erst nach Ready platziert.
+
+Die App meldet `runnerControlVersion: 1`. Für diese Erweiterung sind der aktualisierte Server und ein neu gebauter, installierter App-Stand nötig. Ältere Apps erhalten keine neuen Laufbefehle. Es wurde kein zusätzlicher Laufzeit-/Distanzmesser und keine Speicherung von Trainingssitzungen ergänzt.
+
+13 Server-/Simulatortests sowie der Browserablauf Start → Pause → Pace ändern → Weiterlaufen → Zurücksetzen wurden geprüft. Unity-Kompilierung, Unity-Test-Runner und die Wirkung auf der echten Brille bleiben offen.
+
+
+## Verbindung ohne Zugriffsschlüssel
+
+Der Server lauscht jetzt standardmäßig auf `0.0.0.0:8787` und akzeptiert App und Dashboard ohne Zugriffsschlüssel. `npm start` genügt. Die App verwendet `ws://RECHNER-IP:8787/ws`; ein eventuell noch gesendeter alter Schlüssel wird ignoriert. `ACCESS_TOKEN` hat keine Wirkung mehr. Die lokale IP muss vom Gerät erreichbar sein. Alle Teilnehmer im erreichbaren lokalen Netz können die App steuern; den Port nicht öffentlich freigeben. Frühere Angaben zur verpflichtenden Schlüsselprüfung gelten nicht mehr.

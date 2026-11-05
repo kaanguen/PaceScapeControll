@@ -31,7 +31,7 @@ const cmd = (requestId, commandType = 'runner.pace', payload = { paceMinutesPerK
 async function connected(t, options) {
     const f = await fixture(t, options), dashboard = await f.client('dashboard'), headset = await f.client('headset');
     await headset.next(m => m.type === 'welcome');
-    headset.send({ type: 'state', state: { paceMinutesPerKilometre: 6 } });
+    headset.send({ type: 'state', state: { paceMinutesPerKilometre: 6, runnerControlVersion: 1, runState: 'Ready', canRun: true } });
     await dashboard.next(m => m.type === 'status' && m.state);
     return { ...f, dashboard, headset };
 }
@@ -52,7 +52,7 @@ test('rejects commands offline and validates values without forwarding', async t
 });
 test('relays every supported command and waits for headset acknowledgement', async t => {
     const { dashboard: d, headset: h } = await connected(t);
-    const cases = [['runner.pace', { paceMinutesPerKilometre: 5.5 }], ['runner.spawn', { spawnLane: 8, distanceBehindStartLine: 0 }], ['tracking.configure', { markerLength: 0.2, startupTimeoutSeconds: 20, maxTrackedMarkers: 32 }], ['placement.configure', { placeOnFloor: false, queryPadding: 2, maxMarkerPlaneDistance: 0.1, minimumNormalAlignment: 0.8 }], ['tracking.stop', {}], ['tracking.start', {}], ['tracking.retry', {}]];
+    const cases = [['runner.configure', { paceMinutesPerKilometre: 6, spawnLane: 2, distanceBehindStartLine: 1 }], ['run.start', { paceMinutesPerKilometre: 5.5, spawnLane: 3, distanceBehindStartLine: 0.75 }], ['run.pause', {}], ['run.resume', {}], ['run.reset', {}], ['runner.pace', { paceMinutesPerKilometre: 5.5 }], ['runner.spawn', { spawnLane: 8, distanceBehindStartLine: 0 }], ['tracking.configure', { markerLength: 0.2, startupTimeoutSeconds: 20, maxTrackedMarkers: 32 }], ['placement.configure', { placeOnFloor: false, queryPadding: 2, maxMarkerPlaneDistance: 0.1, minimumNormalAlignment: 0.8 }], ['tracking.stop', {}], ['tracking.start', {}], ['tracking.retry', {}]];
     for (const [type, payload] of cases) {
         d.send(cmd(type, type, payload)); const forwarded = await h.next(m => m.type === 'command');
         assert.equal(forwarded.commandType, type); assert.deepEqual(forwarded.payload, payload);
@@ -84,9 +84,9 @@ test('disconnect clears state and fails pending command; reconnect has no replay
     const replacement = await client('headset'); await replacement.next(m => m.type === 'welcome');
     d.send(cmd('no-state')); assert.equal((await d.next(m => m.requestId === 'no-state')).success, false);
 });
-test('rejects second headset and wrong shared token', async t => {
+test('accepts token-free clients and rejects a second headset', async t => {
     const { client } = await fixture(t, { token: 'example-shared-token' });
-    const bad = await client('dashboard', 'wrong'); assert.equal((await once(bad.ws, 'close'))[0], 1008);
+    const dashboard = await client('dashboard'); await dashboard.next(m => m.type === 'welcome');
     const first = await client('headset', 'example-shared-token'); await first.next(m => m.type === 'welcome');
     const second = await client('headset', 'example-shared-token'); assert.equal((await once(second.ws, 'close'))[0], 1008);
 });
@@ -96,4 +96,27 @@ test('rejects a foreign browser origin and malformed messages do not crash relay
     await once(foreign, 'error');
     const d = await client('dashboard'); d.ws.send('{invalid'); assert.equal((await d.next(m => m.type === 'error')).type, 'error');
     d.send(cmd('alive')); assert.equal((await d.next(m => m.requestId === 'alive')).success, false);
+});
+
+test('requires updated headset capability for run control and validates complete settings', async t => {
+    const { dashboard: d, headset: h } = await connected(t);
+    for (const [id, type, payload] of [
+        ['missing-run-settings', 'run.start', {}],
+        ['incomplete-config', 'runner.configure', { paceMinutesPerKilometre: 6, spawnLane: 1 }],
+        ['invalid-run-pace', 'run.start', { paceMinutesPerKilometre: 0, spawnLane: 1, distanceBehindStartLine: 0.5 }],
+        ['pause-payload', 'run.pause', { start: true }]
+    ]) {
+        d.send(cmd(id, type, payload));
+        assert.equal((await d.next(m => m.requestId === id)).success, false);
+    }
+    h.send({ type: 'state', state: { paceMinutesPerKilometre: 6 } });
+    await d.next(m => m.type === 'status' && m.state && !m.state.runnerControlVersion);
+    d.send(cmd('old-app', 'run.start', { paceMinutesPerKilometre: 6, spawnLane: 1, distanceBehindStartLine: 0.5 }));
+    assert.match((await d.next(m => m.requestId === 'old-app')).error, /neu bauen/);
+});
+
+test('sends application liveness to the headset', async t => {
+    const { headset: h } = await connected(t);
+    const heartbeat = await h.next(m => m.type === 'control');
+    assert.equal(heartbeat.protocol, 1);
 });
