@@ -10,6 +10,12 @@ const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const range = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
 const runnerSettings = p => range(p.paceMinutesPerKilometre, 0.1, 60) && Number.isInteger(p.spawnLane) && range(p.spawnLane, 1, 8) && range(p.distanceBehindStartLine, 0, 1000);
 export const commands = {
+    'runner.comparison': p => Number.isInteger(p.comparisonDistanceMetres) && range(p.comparisonDistanceMetres, 1, 1000000) && typeof p.useDemoRecords === 'boolean' && Object.keys(p).length === 2,
+    'runner.mode': p => ['FixedPace', 'AllTimePersonalBest'].includes(p.runnerMode) && Object.keys(p).length === 1,
+    'treadmill.scan': p => Object.keys(p).length === 0,
+    'treadmill.scan.stop': p => Object.keys(p).length === 0,
+    'treadmill.connect': p => typeof p.deviceId === 'string' && p.deviceId.trim().length > 0 && p.deviceId.length <= 256 && Object.keys(p).length === 1,
+    'treadmill.disconnect': p => Object.keys(p).length === 0,
     'runner.create': runnerSettings,
     'runner.remove': p => Object.keys(p).length === 0,
     'runner.configure': runnerSettings,
@@ -96,6 +102,9 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {
                 if (!updatedAt || Date.now() - updatedAt > staleTimeout) return reject('App-Status veraltet.');
                 if ((m.commandType.startsWith('run.') || m.commandType === 'runner.configure') && state.runnerControlVersion !== 1) return reject('Die App unterstützt die neue Laufsteuerung noch nicht. Bitte neu bauen und installieren.');
                 if (['runner.create', 'runner.remove'].includes(m.commandType) && (state.spawnControlVersion !== 1 || state.testScene !== true)) return reject('Spawnen ist nur in der verbundenen Unity-Testszene verfügbar.');
+                if (m.commandType.startsWith('treadmill.') && state.treadmillControlVersion !== 1) return reject('Für die Laufband-Verbindung die aktualisierte App neu bauen und installieren.');
+                if (m.commandType === 'runner.mode' && state.ghostControlVersion !== 1) return reject('Für die Ghost-Steuerung die aktualisierte App neu bauen und installieren.');
+                if ((m.commandType === 'runner.comparison' || (m.commandType === 'runner.mode' && m.payload.runnerMode === 'AllTimePersonalBest')) && state.comparisonControlVersion !== 1) return reject('Für Runden und All-time PRs die aktualisierte App installieren.');
                 if (pending.size) return reject('Ein Befehl wartet auf Bestätigung.');
                 const commandId = randomUUID();
                 const timer = setTimeout(() => finish(commandId, false, 'Keine Bestätigung. Zustand prüfen; Befehl wird nicht wiederholt.'), commandTimeout);

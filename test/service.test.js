@@ -120,3 +120,94 @@ test('sends application liveness to the headset', async t => {
     const heartbeat = await h.next(m => m.type === 'control');
     assert.equal(heartbeat.protocol, 1);
 });
+
+test('requires treadmill capability and relays explicit read-only BLE actions', async t => {
+    const { dashboard: d, headset: h } = await connected(t);
+    d.send(cmd('old-ble-app', 'treadmill.scan', {}));
+    assert.match((await d.next(m => m.requestId === 'old-ble-app')).error, /neu bauen/);
+    h.send({ type: 'state', state: { treadmillControlVersion: 1, treadmill: { supported: true } } });
+    await d.next(m => m.type === 'status' && m.state?.treadmillControlVersion === 1);
+    for (const [type, payload] of [
+        ['treadmill.scan', {}], ['treadmill.scan.stop', {}],
+        ['treadmill.connect', { deviceId: 'AA:BB:CC:DD:EE:FF' }],
+        ['treadmill.disconnect', {}]
+    ]) {
+        d.send(cmd(type, type, payload));
+        const forwarded = await h.next(m => m.type === 'command');
+        assert.equal(forwarded.commandType, type);
+        assert.deepEqual(forwarded.payload, payload);
+        h.send({ type: 'ack', commandId: forwarded.commandId, success: true });
+        assert.equal((await d.next(m => m.requestId === type)).success, true);
+    }
+    for (const [id, type, payload] of [
+        ['no-id', 'treadmill.connect', {}], ['empty-id', 'treadmill.connect', { deviceId: ' ' }],
+        ['long-id', 'treadmill.connect', { deviceId: 'x'.repeat(257) }],
+        ['unexpected-write', 'treadmill.connect', { deviceId: 'abc', speed: 12 }],
+        ['motor-speed', 'treadmill.speed', { speedKmh: 12 }],
+        ['extra-scan', 'treadmill.scan', { autoConnect: true }]
+    ]) {
+        d.send(cmd(id, type, payload));
+        assert.equal((await d.next(m => m.requestId === id)).success, false);
+    }
+});
+
+test('preserves zero-speed treadmill telemetry and raw distance through relay', async t => {
+    const { dashboard: d, headset: h } = await connected(t);
+    const treadmill = { supported: true, followTreadmill: true, hasSpeed: true, speedKmh: 0, hasDistance: true, totalDistanceMetres: 66000, devices: [{ id: 'abc', name: '<device>' }] };
+    h.send({ type: 'state', state: { treadmillControlVersion: 1, treadmill } });
+    const status = await d.next(m => m.type === 'status' && m.state?.treadmill);
+    assert.deepEqual(status.state.treadmill, treadmill);
+});
+
+test('runner mode requires capability, strict mode names and headset acknowledgement', async t => {
+    const { dashboard: d, headset: h } = await connected(t);
+    d.send(cmd('old-mode-app', 'runner.mode', { runnerMode: 'FixedPace' }));
+    assert.match((await d.next(m => m.requestId === 'old-mode-app')).error, /neu bauen/);
+    h.send({ type: 'state', state: { runnerModeControlVersion: 1, ghostControlVersion: 1, comparisonControlVersion: 1, runnerMode: 'FixedPace' } });
+    await d.next(m => m.type === 'status' && m.state?.runnerModeControlVersion === 1);
+    for (const mode of ['FixedPace', 'AllTimePersonalBest']) {
+        d.send(cmd(mode, 'runner.mode', { runnerMode: mode }));
+        const forwarded = await h.next(m => m.type === 'command');
+        assert.equal(forwarded.commandType, 'runner.mode');
+        assert.deepEqual(forwarded.payload, { runnerMode: mode });
+        h.send({ type: 'ack', commandId: forwarded.commandId, success: true });
+        assert.equal((await d.next(m => m.requestId === mode)).success, true);
+    }
+    for (const [index, payload] of [{}, { runnerMode: 'GhostRunner' }, { runnerMode: '1' }, { runnerMode: null }, { runnerMode: 'FixedPace', speed: 12 }].entries()) {
+        const id = `bad-mode-${index}`;
+        d.send(cmd(id, 'runner.mode', payload));
+        assert.equal((await d.next(m => m.requestId === id)).success, false);
+    }
+});
+
+test('comparison settings require updated capability and exact distance/demo fields', async t => {
+    const { dashboard: d, headset: h } = await connected(t);
+    d.send(cmd('old-comparison', 'runner.comparison', { comparisonDistanceMetres: 400, useDemoRecords: false }));
+    assert.match((await d.next(m => m.requestId === 'old-comparison')).error, /aktualisierte App/);
+    d.send(cmd('old-alltime', 'runner.mode', { runnerMode: 'AllTimePersonalBest' }));
+    assert.equal((await d.next(m => m.requestId === 'old-alltime')).success, false);
+    h.send({ type: 'state', state: { runnerModeControlVersion: 1, ghostControlVersion: 1, comparisonControlVersion: 1 } });
+    await d.next(m => m.type === 'status' && m.state?.comparisonControlVersion === 1);
+    for (const [type, payload] of [['runner.comparison', { comparisonDistanceMetres: 5000, useDemoRecords: true }], ['runner.mode', { runnerMode: 'AllTimePersonalBest' }]]) {
+        d.send(cmd(type, type, payload)); const forwarded = await h.next(m => m.type === 'command');
+        assert.deepEqual(forwarded.payload, payload);
+        h.send({ type: 'ack', commandId: forwarded.commandId, success: true });
+        assert.equal((await d.next(m => m.requestId === type)).success, true);
+    }
+    for (const [i, payload] of [{ comparisonDistanceMetres: 0, useDemoRecords: false }, { comparisonDistanceMetres: 400.5, useDemoRecords: false }, { comparisonDistanceMetres: 400 }, { comparisonDistanceMetres: 400, useDemoRecords: 'true' }, { comparisonDistanceMetres: 1000001, useDemoRecords: false }].entries()) {
+        d.send(cmd(`bad-comparison-${i}`, 'runner.comparison', payload));
+        assert.equal((await d.next(m => m.requestId === `bad-comparison-${i}`)).success, false);
+    }
+});
+
+test('ghost mode exposes only fixed pace and all-time PR references', async t => {
+    const { dashboard: d, headset: h } = await connected(t);
+    h.send({ type: 'state', state: { ghostControlVersion: 1, runnerModeControlVersion: 1, comparisonControlVersion: 1 } });
+    await d.next(m => m.type === 'status' && m.state?.ghostControlVersion === 1);
+    for (const retired of ['FollowInput', 'TempoRunner', 'SideBySide', 'SessionBest']) {
+        d.send(cmd(retired, 'runner.mode', { runnerMode: retired }));
+        assert.equal((await d.next(m => m.requestId === retired)).success, false);
+    }
+    d.send(cmd('retired-input-selector', 'treadmill.manual', {}));
+    assert.equal((await d.next(m => m.requestId === 'retired-input-selector')).success, false);
+});

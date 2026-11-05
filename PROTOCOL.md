@@ -20,7 +20,7 @@ The headset sends a complete state every second and after applying a command:
 {"type":"state","state":{"deviceName":"Magic Leap 2","isEditor":false,"trackingEnabled":true,"phase":"Ready","startupStatus":"Ready","startupError":"","placedMarkers":1,"pendingMarkers":0,"paceMinutesPerKilometre":6,"spawnLane":1,"distanceBehindStartLine":0.5,"markerLength":0.1,"startupTimeoutSeconds":15,"maxTrackedMarkers":64,"placeOnFloor":true,"queryPadding":1,"maxMarkerPlaneDistance":0.15,"minimumNormalAlignment":0.9}}
 ```
 
-The simulator adds `isSimulation:true`. No device position or running physiology is transmitted. State describes configured target pace, not measured physical speed. Run-control-capable clients also include `runnerControlVersion: 1`, `runState: "Ready" | "Running" | "Paused"`, `runnableMarkers` (visible tracked anchor count) and `canRun` (foreground Ready tracking with every current placement tracked). The server rejects new run commands for clients without this capability.
+The simulator adds `isSimulation:true`. No device position or running physiology is transmitted. The top-level pace describes the saved manual target. FTMS-capable headsets additionally report belt telemetry in `treadmill`; belt data measures only the user, while the ghost uses preset or all-time reference pace. Run-control-capable clients also include `runnerControlVersion: 1`, `runState: "Ready" | "Running" | "Paused"`, `runnableMarkers` (visible tracked anchor count) and `canRun` (foreground Ready tracking with every current placement tracked). The server rejects new run commands for clients without this capability.
 
 The server sends dashboards `{"type":"status","headsetConnected":true,"state":{...},"updatedAt":1790000000000,"pending":0}`. `updatedAt` is server reception time in Unix milliseconds. Disconnection clears state. No persistent state or command replay.
 
@@ -70,3 +70,25 @@ Tracking stop/retry and detector/plane configuration cleanup return the run to R
 ## Verbindung ohne Zugriffsschlüssel
 
 Der Server lauscht jetzt standardmäßig auf `0.0.0.0:8787` und akzeptiert App und Dashboard ohne Zugriffsschlüssel. `npm start` genügt. Die App verwendet `ws://RECHNER-IP:8787/ws`; ein eventuell noch gesendeter alter Schlüssel wird ignoriert. `ACCESS_TOKEN` hat keine Wirkung mehr. Die lokale IP muss vom Gerät erreichbar sein. Alle Teilnehmer im erreichbaren lokalen Netz können die App steuern; den Port nicht öffentlich freigeben. Frühere Angaben zur verpflichtenden Schlüsselprüfung gelten nicht mehr.
+
+## Read-only FTMS treadmill input
+
+Tracking-scene headsets advertise `treadmillControlVersion: 1`. Commands: `treadmill.scan`, `treadmill.scan.stop`, `treadmill.disconnect` with `{}`, and `treadmill.connect` with `{ "deviceId": "ID from the current scan" }`. Connection is asynchronous: ACK accepts the request; state confirms connection and data. BLE is performed by the Android headset. Devices are selected explicitly, never automatically by name. No motor/incline writes exist.
+
+`treadmill` state contains `supported`, `status`, `scanning`, `busy`, `connected`, `hasTreadmillData`, `deviceId`, `deviceName`, `hasSpeed`, `speedKmh`, `hasDistance`, `totalDistanceMetres`, and `devices: [{id,name}]`. Validity flags distinguish missing speed/distance from valid zero values. Distance is the raw device counter in metres.
+
+BLE connection changes affect user measurement only. Fresh speed, known standstill and missing samples never directly set or gate ghost speed. Ghost target and user telemetry remain separate.
+
+The marker-free test scene and the existing simulator do not implement BLE. Local UI verification used a separate labelled fixture, not real hardware.
+
+## Distance comparison and all-time treadmill PRs
+
+Updated clients advertise `comparisonControlVersion: 1`, `activeRunnerPace` and `performance` with measurement distance, current lap/time/average, lap history/validity, session best, real all-time best, separate optional demo time, record list and storage/pending status. `runner.comparison` accepts exactly `{ "comparisonDistanceMetres": 5000, "useDemoRecords": false }` (1–1000000 integer metres); distance changes require Ready and demo changes require Ready/Paused. `runner.mode` accepts only `FixedPace` (the default) or `AllTimePersonalBest` and requires `ghostControlVersion: 1`. FixedPace always uses the preset; all-time mode uses the persisted distance record. Current-run bests remain statistics only.
+
+In the dashboard choose 400-m rounds or a custom kilometre distance under **Runden & Vergleichsdistanz**. Fresh belt telemetry is measured independently of avatar movement. Known zero-speed time counts; incomplete/unknown intervals never form records across pauses or data gaps. The current selected distance is evaluated, including windows within longer runs. Real PRs are saved on the headset across sessions and only replaced by faster measured efforts. Fictitious examples for 400 m / 5 km / 10 km are opt-in, labelled, and never stored as measured PRs. Reset clears current-run measurements, preserving real records and settings. Mode changes retain completed measurements and pause motion.
+
+The existing simulator exercises settings and demo targets but does not generate real measurements or persisted records. A new Android build and server restart are required. No Strava connection, official-race certification or cloud sync is provided.
+
+## Ghost-only avatar
+
+The avatar is an independent ghost with exactly two references: `FixedPace` (default, preset speed) and `AllTimePersonalBest` (the persisted distance record, average pace). Clients advertise `ghostControlVersion: 1`; both dashboard selection and the relay require this capability. `FollowInput`, `TempoRunner`, side-by-side modes and `treadmill.manual` are rejected. The BLE panel is exclusively for user measurement. The ghost never directly follows live belt speed or a current-run best. User progress and records never derive from ghost motion. Existing tracking/app/server pause rules remain active. Mode changes pause without rewinding; reset retains the selected reference. A side-by-side companion is deferred.

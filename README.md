@@ -103,3 +103,21 @@ Der Server lauscht jetzt standardmäßig auf `0.0.0.0:8787` und akzeptiert App u
 Die Live-Geschwindigkeit wird über einen Slider im Bereich Läufer einstellen in km/h gesetzt und automatisch in Pace umgerechnet. Gültige Eingaben werden nach einer kurzen Eingabepause automatisch an die App übertragen; die bestätigte Zielpace wird separat angezeigt. Spur und Startabstand werden dadurch nicht verändert. Nach einem Verbindungsabbruch werden keine vorgemerkten Pace-Befehle wiederholt.
 
 Am Slider lässt sich zwischen **km/h** und **Pace (min/km)** umschalten. Der Einheitenwechsel verändert das Zieltempo nicht und sendet keinen Befehl. Im Pace-Modus wird in Sekunden pro Kilometer eingestellt; die automatische Übertragung bleibt aktiv.
+
+## FTMS-Laufband verbinden
+
+Mit dem aktualisierten PaceScape-Gerätebuild im Bereich **Laufband verbinden** nach Bluetooth-Geräten suchen, Berechtigungen auf der Brille erlauben, das Laufband anhand von Name/Kennung auswählen und verbinden. Auf die gemeldete Geschwindigkeit warten, dann den virtuellen Lauf bewusst starten. Die Laufbanddaten messen ausschließlich deinen Fortschritt. Der Ghost nutzt voreingestelltes Tempo oder All-time PR unabhängig von deinem aktuellen Tempo. Ein bereits laufender Server muss nach diesem Update neu gestartet werden.
+
+Unterstützt wird das Lesen von FTMS Treadmill Data (1826/2ACD); keine Steuerung des realen Motors. Die optionale Gesamtdistanz ist der rohe Laufbandzähler. Bluetooth läuft auf der Brille; der Unity Editor und der bestehende Simulator führen keinen BLE-Scan aus. Das konkrete Domyos-Modell und die Hardware-Verbindung müssen noch geprüft werden. Protokoll siehe [PROTOCOL.md](PROTOCOL.md).
+
+## Distance comparison and all-time treadmill PRs
+
+Updated clients advertise `comparisonControlVersion: 1`, `activeRunnerPace` and `performance` with measurement distance, current lap/time/average, lap history/validity, session best, real all-time best, separate optional demo time, record list and storage/pending status. `runner.comparison` accepts exactly `{ "comparisonDistanceMetres": 5000, "useDemoRecords": false }` (1–1000000 integer metres); distance changes require Ready and demo changes require Ready/Paused. `runner.mode` accepts only `FixedPace` (the default) or `AllTimePersonalBest` and requires `ghostControlVersion: 1`. FixedPace always uses the preset; all-time mode uses the persisted distance record. Current-run bests remain statistics only.
+
+In the dashboard choose 400-m rounds or a custom kilometre distance under **Runden & Vergleichsdistanz**. Fresh belt telemetry is measured independently of avatar movement. Known zero-speed time counts; incomplete/unknown intervals never form records across pauses or data gaps. The current selected distance is evaluated, including windows within longer runs. Real PRs are saved on the headset across sessions and only replaced by faster measured efforts. Fictitious examples for 400 m / 5 km / 10 km are opt-in, labelled, and never stored as measured PRs. Reset clears current-run measurements, preserving real records and settings. Mode changes retain completed measurements and pause motion.
+
+The existing simulator exercises settings and demo targets but does not generate real measurements or persisted records. A new Android build and server restart are required. No Strava connection, official-race certification or cloud sync is provided.
+
+## Ghost-only avatar
+
+The avatar is an independent ghost with exactly two references: `FixedPace` (default, preset speed) and `AllTimePersonalBest` (the persisted distance record, average pace). Clients advertise `ghostControlVersion: 1`; both dashboard selection and the relay require this capability. `FollowInput`, `TempoRunner`, side-by-side modes and `treadmill.manual` are rejected. The BLE panel is exclusively for user measurement. The ghost never directly follows live belt speed or a current-run best. User progress and records never derive from ghost motion. Existing tracking/app/server pause rules remain active. Mode changes pause without rewinding; reset retains the selected reference. A side-by-side companion is deferred.
