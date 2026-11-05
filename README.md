@@ -14,11 +14,16 @@
   <a href="#die-idee">Die Idee</a> &nbsp;·&nbsp;
   <a href="#entwicklungsstand">Entwicklungsstand</a> &nbsp;·&nbsp;
   <a href="#schnellstart">Schnellstart</a> &nbsp;·&nbsp;
-  <a href="docs/setup.md">Dokumentation</a>
+  <a href="docs/setup.md">Dokumentation</a> &nbsp;·&nbsp;
+  <a href="https://github.com/kaanguen/PaceScape">Unity-Projekt</a>
 
 </div>
 
 ---
+
+## Zugehöriges Unity-Projekt
+
+Die App für die Magic Leap 2 und der Unity-WebSocket-Client liegen im separaten Repository **[PaceScape](https://github.com/kaanguen/PaceScape)**. Dieses Repository enthält den lokalen Server und das Web-Dashboard zur Steuerung der App.
 
 ## Die Idee
 
@@ -93,3 +98,8 @@ USB-Einrichtung, WLAN-Betrieb ohne Zugriffsschlüssel und Fehlerverhalten sind i
 ## Verbindung ohne Zugriffsschlüssel
 
 Der Server lauscht jetzt standardmäßig auf `0.0.0.0:8787` und akzeptiert App und Dashboard ohne Zugriffsschlüssel. `npm start` genügt. Die App verwendet `ws://RECHNER-IP:8787/ws`; ein eventuell noch gesendeter alter Schlüssel wird ignoriert. `ACCESS_TOKEN` hat keine Wirkung mehr. Die lokale IP muss vom Gerät erreichbar sein. Alle Teilnehmer im erreichbaren lokalen Netz können die App steuern; den Port nicht öffentlich freigeben. Frühere Angaben zur verpflichtenden Schlüsselprüfung gelten nicht mehr.
+
+
+Die Live-Geschwindigkeit wird über einen Slider im Bereich Läufer einstellen in km/h gesetzt und automatisch in Pace umgerechnet. Gültige Eingaben werden nach einer kurzen Eingabepause automatisch an die App übertragen; die bestätigte Zielpace wird separat angezeigt. Spur und Startabstand werden dadurch nicht verändert. Nach einem Verbindungsabbruch werden keine vorgemerkten Pace-Befehle wiederholt.
+
+Am Slider lässt sich zwischen **km/h** und **Pace (min/km)** umschalten. Der Einheitenwechsel verändert das Zieltempo nicht und sendet keinen Befehl. Im Pace-Modus wird in Sekunden pro Kilometer eingestellt; die automatische Übertragung bleibt aktiv.

@@ -267,3 +267,14 @@ input:disabled, select:disabled { opacity: .5; cursor: not-allowed; }
 .run-actions { display: flex; flex-direction: column; gap: 8px; }
 #spawnControls { display: flex; gap: 10px; }
 #spawnControls button { flex: 1; }
+
+.live-speed { margin-bottom: 22px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+.speed-slider-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.speed-slider-heading output { color: var(--accent); font-size: 13px; font-variant-numeric: tabular-nums; }
+#paceInput[type=range] { appearance: auto; width: 100%; height: 30px; min-height: 30px; padding: 0; border: 0; background: transparent; accent-color: var(--accent); cursor: pointer; margin: 10px 0 0; }
+.slider-scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
+.runner-fields { grid-template-columns: .7fr 1.3fr; }
+@media(max-width:740px) { .speed-slider-heading { flex-wrap: wrap; } }
+
+#paceUnit { width: auto; min-width: 120px; margin: 0; font-size: 12px; }
+#paceInput.pace-mode { direction: rtl; }
