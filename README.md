@@ -36,13 +36,13 @@ Die App für die Magic Leap 2 und der Unity-WebSocket-Client liegen im separaten
 | :---: | :---: | :---: |
 | Pace, Spur und Startposition gemeinsam einstellen. | Platzierten Läufer bewusst starten, pausieren und zurücksetzen. | Trackingphase, Marker und Meldungen direkt sehen. |
 
-Das Dashboard nutzt ein schlichtes Dark-Mode-Design mit neutralen Grautönen und den Bereichen Dashboard, Konfiguration, Analyse und Hilfe. Die Kameraansicht zeigt derzeit ein gekennzeichnetes Titelbild. Die schematische Laufbahn in der Konfiguration zeigt die bestätigte Laufspur; sie ist keine Live-Positionsmessung.
+Das Dashboard nutzt ein schlichtes Dark-Mode-Design mit neutralen Grautönen und den Bereichen Dashboard, Konfiguration, Analyse und Hilfe. Die Kameraansicht unterstützt eine bewusst gestartete Live-Vorschau der Magic Leap 2; dafür sind der aktualisierte Gerätebuild, Kameraberechtigung und ein neu gestarteter Server nötig. Die benachbarte Skelettansicht ist ein gekennzeichneter Platzhalter. Die schematische Laufbahn in der Konfiguration zeigt die bestätigte Laufspur; sie ist keine Live-Positionsmessung.
 
 <details>
   <summary>Dashboard ansehen</summary>
   <br>
-  <img src="docs/assets/dashboard-preview.png" alt="PaceScape Control mit AR-Läufer-Logo, neutralem Dark Mode und offline geschaltetem Gerätestatus." width="1100">
-  <p><em>Offline-Vorschau ohne echte Brillen- oder Trainingsdaten. Das Laufmotiv ist ein Titelbild, keine Live-Kameraübertragung.</em></p>
+  <img src="docs/assets/dashboard-preview.png" alt="PaceScape Control mit Live-Kamerafeld, Skelettplatzhalter, Bestzeiten, Rundenfortschritt und Ghost-Temporegler." width="1100">
+  <p><em>Offline-Vorschau ohne echte Brillen- oder Trainingsdaten. Die Kamera ist ausgeschaltet, die Skelettzeichnung ist keine Messung.</em></p>
 </details>
 
 ## Entwicklungsstand
@@ -124,3 +124,12 @@ The existing simulator exercises settings and demo targets but does not generate
 ## Ghost-only avatar
 
 The avatar is an independent ghost with exactly two references: `FixedPace` (default, preset speed) and `AllTimePersonalBest` (the persisted distance record, average pace). Clients advertise `ghostControlVersion: 1`; both dashboard selection and the relay require this capability. `FollowInput`, `TempoRunner`, side-by-side modes and `treadmill.manual` are rejected. The BLE panel is exclusively for user measurement. The ghost never directly follows live belt speed or a current-run best. User progress and records never derive from ghost motion. Existing tracking/app/server pause rules remain active. Mode changes pause without rewinding; reset retains the selected reference. A side-by-side companion is deferred.
+
+
+## Kamera, Rundenfortschritt und Bestzeiten
+
+Im Dashboard die **Live-Kamera** bewusst starten und die Kameraberechtigung auf der Brille erlauben. Die Vorschau überträgt bis zu zwei JPEG-Bilder pro Sekunde; es werden keine Videos aufgezeichnet. Stoppen, App-Unterbrechung oder Verbindungsabbruch beendet die Übertragung. Kamera und Markertracking müssen gemeinsam auf der echten Brille geprüft werden. Ein neuer Gerätebuild und ein Serverneustart sind erforderlich.
+
+Rechts zeigen die kleine Laufbahn und der Ghost-Temporegler den gemessenen Rundenfortschritt und das voreingestellte Ghost-Tempo. Die Markierung stellt Laufbandfortschritt in der Vergleichsdistanz dar, keine räumliche Position. Der Gerätestatus ist unter **Hilfe** erreichbar.
+
+Unter der Laufsteuerung stehen die beste gemessene Sessionzeit, der All-time PR und gespeicherte Zeiten je Distanz. **PR geknackt** erscheint erst nach bestätigter Speicherung und Vergleich mit dem Rekord vor der Session. Ältere Gerätebuilds zeigen gemessene Zeiten, aber keine bestätigte PR-Meldung. Es werden keine Kilometerzeiten hochgerechnet. Technische Details siehe [Protokoll](PROTOCOL.md#camera-preview-version-1).

@@ -8,8 +8,11 @@ import { WebSocketServer, WebSocket } from 'ws';
 const root = dirname(fileURLToPath(import.meta.url));
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const range = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+const maxCameraFrameBytes = 2 * 1024 * 1024;
 const runnerSettings = p => range(p.paceMinutesPerKilometre, 0.1, 60) && Number.isInteger(p.spawnLane) && range(p.spawnLane, 1, 8) && range(p.distanceBehindStartLine, 0, 1000);
 export const commands = {
+    'camera.start': p => Object.keys(p).length === 0,
+    'camera.stop': p => Object.keys(p).length === 0,
     'runner.comparison': p => Number.isInteger(p.comparisonDistanceMetres) && range(p.comparisonDistanceMetres, 1, 1000000) && typeof p.useDemoRecords === 'boolean' && Object.keys(p).length === 2,
     'runner.mode': p => ['FixedPace', 'AllTimePersonalBest'].includes(p.runnerMode) && Object.keys(p).length === 1,
     'treadmill.scan': p => Object.keys(p).length === 0,
@@ -46,7 +49,7 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {
         broadcast();
     };
     const server = http.createServer(async (req, res) => {
-        const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'" };
+        const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; connect-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'" };
         const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/assets/session-track.jpg': ['assets/session-track.jpg', 'image/jpeg'] };
         if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405, headers); res.end(); return; }
         const path = new URL(req.url, 'http://localhost').pathname;
@@ -58,7 +61,7 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {
             res.end(req.method === 'HEAD' ? undefined : body);
         } catch { res.writeHead(500, headers); res.end('Could not load dashboard'); }
     });
-    const wss = new WebSocketServer({ noServer: true, maxPayload: 16384 });
+    const wss = new WebSocketServer({ noServer: true, maxPayload: maxCameraFrameBytes });
     server.on('upgrade', (req, socket, head) => {
         try {
             const host = new URL(`http://${req.headers.host}`).hostname;
@@ -69,7 +72,7 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {
         } catch { socket.destroy(); }
     });
     wss.on('connection', ws => {
-        let role = null, count = 0, windowStart = Date.now();
+        let role = null, count = 0, windowStart = Date.now(), lastCameraFrame = 0;
         ws.alive = true;
         ws.on('error', () => {});
         ws.on('pong', () => { ws.alive = true; });
@@ -79,7 +82,19 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {
             try {
                 if (Date.now() - windowStart >= 1000) { count = 0; windowStart = Date.now(); }
                 if (++count > 30) { ws.close(1008, 'Message rate exceeded'); return; }
-                if (binary) throw new Error('Text JSON required');
+                if (binary) {
+                    if (role !== 'headset' || ws !== headset || state?.cameraControlVersion !== 1 ||
+                        state?.camera?.enabled !== true || Date.now() - updatedAt > staleTimeout) throw new Error('Camera stream is not enabled');
+                    if (raw.length < 4 || raw.length > maxCameraFrameBytes || raw[0] !== 0xff || raw[1] !== 0xd8 ||
+                        raw[raw.length - 2] !== 0xff || raw[raw.length - 1] !== 0xd9) throw new Error('JPEG frame required');
+                    if (Date.now() - lastCameraFrame < 400) return;
+                    lastCameraFrame = Date.now();
+                    for (const dashboard of dashboards) {
+                        if (dashboard.readyState === WebSocket.OPEN && dashboard.bufferedAmount < maxCameraFrameBytes) dashboard.send(raw, { binary: true });
+                    }
+                    return;
+                }
+                if (raw.length > 16384) throw new Error('JSON message too large');
                 const m = JSON.parse(raw.toString());
                 if (!object(m)) throw new Error('JSON object required');
                 if (!role) {
@@ -105,6 +120,7 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {
                 if (m.commandType.startsWith('treadmill.') && state.treadmillControlVersion !== 1) return reject('Für die Laufband-Verbindung die aktualisierte App neu bauen und installieren.');
                 if (m.commandType === 'runner.mode' && state.ghostControlVersion !== 1) return reject('Für die Ghost-Steuerung die aktualisierte App neu bauen und installieren.');
                 if ((m.commandType === 'runner.comparison' || (m.commandType === 'runner.mode' && m.payload.runnerMode === 'AllTimePersonalBest')) && state.comparisonControlVersion !== 1) return reject('Für Runden und All-time PRs die aktualisierte App installieren.');
+                if (m.commandType.startsWith('camera.') && state.cameraControlVersion !== 1) return reject('Für die Live-Kamera die aktualisierte Brillen-App installieren.');
                 if (pending.size) return reject('Ein Befehl wartet auf Bestätigung.');
                 const commandId = randomUUID();
                 const timer = setTimeout(() => finish(commandId, false, 'Keine Bestätigung. Zustand prüfen; Befehl wird nicht wiederholt.'), commandTimeout);

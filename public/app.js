@@ -1,9 +1,10 @@
 const $ = id => document.getElementById(id);
 let socket, reconnectTimer, snapshot, pending, generation = 0, accessToken = '';
 let queuedPace = null, paceTimer, selectedPace = 6;
+let cameraFrameUrl = null, cameraFrameAt = 0;
 const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
 $('siteUrl').textContent = location.origin; $('wsUrl').textContent = wsUrl;
-const names = { 'runner.comparison': 'Vergleichsdistanz ändern', 'runner.mode': 'Läufermodus ändern', 'treadmill.scan': 'Bluetooth suchen', 'treadmill.scan.stop': 'Suche stoppen', 'treadmill.connect': 'Laufband verbinden', 'treadmill.disconnect': 'Laufband trennen', 'runner.create': 'Läufer spawnen', 'runner.remove': 'Läufer entfernen', 'runner.configure': 'Läufer einstellen', 'run.start': 'Lauf starten', 'run.pause': 'Lauf pausieren', 'run.resume': 'Weiterlaufen', 'run.reset': 'Lauf zurücksetzen', 'runner.pace': 'Pace ändern', 'runner.spawn': 'Startposition ändern', 'tracking.start': 'Tracking starten', 'tracking.stop': 'Tracking stoppen', 'tracking.retry': 'Tracking neu starten', 'tracking.configure': 'Erkennung konfigurieren', 'placement.configure': 'Platzierung konfigurieren' };
+const names = { 'camera.start': 'Kamera starten', 'camera.stop': 'Kamera stoppen', 'runner.comparison': 'Vergleichsdistanz ändern', 'runner.mode': 'Läufermodus ändern', 'treadmill.scan': 'Bluetooth suchen', 'treadmill.scan.stop': 'Suche stoppen', 'treadmill.connect': 'Laufband verbinden', 'treadmill.disconnect': 'Laufband trennen', 'runner.create': 'Läufer spawnen', 'runner.remove': 'Läufer entfernen', 'runner.configure': 'Läufer einstellen', 'run.start': 'Lauf starten', 'run.pause': 'Lauf pausieren', 'run.resume': 'Weiterlaufen', 'run.reset': 'Lauf zurücksetzen', 'runner.pace': 'Pace ändern', 'runner.spawn': 'Startposition ändern', 'tracking.start': 'Tracking starten', 'tracking.stop': 'Tracking stoppen', 'tracking.retry': 'Tracking neu starten', 'tracking.configure': 'Erkennung konfigurieren', 'placement.configure': 'Platzierung konfigurieren' };
 const phases = { Stopped: 'Gestoppt', Ready: 'Bereit', Failed: 'Fehler', UnsupportedPlatform: 'Editor / nicht unterstützt', WaitingForScene: 'Szene laden', CheckingConfiguration: 'Konfiguration prüfen', RequestingPermissions: 'Berechtigungen anfragen', WaitingForOpenXR: 'Warten auf OpenXR', CheckingFeatures: 'XR-Funktionen prüfen', StartingSubsystems: 'Subsysteme starten', StartingMarkerDetector: 'Markererkennung starten', Suspended: 'Unterbrochen', Recovering: 'Wiederherstellung' };
 function log(message) {
     const li = document.createElement('li'), time = document.createElement('time');
@@ -52,6 +53,8 @@ function controls() {
     $('treadmillDisconnect').disabled = !treadmill?.connected && !treadmill?.busy;
     $('lastUpdate').textContent = snapshot?.updatedAt ? `vor ${Math.max(0, Math.floor((Date.now() - snapshot.updatedAt) / 1000))} s` : '—';
     if (snapshot?.headsetConnected && !fresh()) notice('App-Status veraltet. Warte auf ein neues Update.', true);
+    renderMiniTrack();
+    renderCameraControls();
 }
 function sync(id, value) {
     const input = $(id);
@@ -111,10 +114,12 @@ function render(message) {
             ? 'Der Ghost läuft mit dem konstanten Durchschnittstempo deines gespeicherten All-time PRs für die gewählte Distanz. Ohne PR gilt das voreingestellte Tempo oder ein ausdrücklich gewähltes Beispiel.'
             : 'Der Ghost läuft mit dem voreingestellten Tempo am Slider. Dein Laufbandtempo und die Bestleistung des aktuellen Laufs verändern dieses Tempo nicht.';
     renderPerformance(s);
+    renderSessionSummary(s);
     renderTreadmill(s);
     controls();
 }
 function connect() {
+    clearCameraFrame();
     queuedPace = null; clearTimeout(paceTimer); delete $('paceInput').dataset.dirty;
     clearTimeout(reconnectTimer); const current = ++generation;
     if (pending) { clearTimeout(pending.timer); log('Neu verbinden: Ausführung des laufenden Befehls unklar.'); pending = null; }
@@ -123,6 +128,7 @@ function connect() {
     socket.onopen = () => { if (current === generation) socket.send(JSON.stringify({ type: 'hello', protocol: 1, role: 'dashboard', token: accessToken })); };
     socket.onmessage = event => {
         if (current !== generation) return;
+        if (typeof event.data !== 'string') { receiveCameraFrame(event.data); return; }
         let m; try { m = JSON.parse(event.data); } catch { return; }
         if (m.type === 'welcome') { $('connection').textContent = 'Server verbunden'; $('connection').classList.add('online'); log('WebSocket zum Server verbunden.'); }
         if (m.type === 'status') render(m);
@@ -361,3 +367,168 @@ function showView() {
 }
 window.addEventListener('hashchange', showView);
 showView();
+
+// Project measured belt progress onto a schematic comparison lap, never world coordinates.
+function renderMiniTrack() {
+    const state = snapshot?.state;
+    const view = trackProgress(state, fresh());
+    $('miniTrackDistance').textContent = view.distanceLabel;
+    $('miniTrackProgress').textContent = view.progressLabel;
+    $('miniTrackLap').textContent = view.lapLabel;
+    $('miniTrackStatus').textContent = view.status;
+    $('miniTrackDescription').textContent = view.description;
+    const marker = $('miniUserMarker');
+    marker.setAttribute('visibility', view.progress === null ? 'hidden' : 'visible');
+    if (view.progress !== null) {
+        const path = $('miniTrackPath');
+        const point = path.getPointAtLength(path.getTotalLength() * view.progress);
+        marker.setAttribute('transform', `translate(${point.x} ${point.y})`);
+    }
+    $('dashboardSpeedHint').textContent = state?.runnerMode === 'AllTimePersonalBest'
+        ? 'PR-Modus aktiv. Der Regler ändert nur das voreingestellte Ersatztempo.'
+        : 'Voreingestelltes Tempo für deinen Ghost. Dein Laufband wird nicht gesteuert.';
+}
+
+// This is a distance visualization, not an estimate of headset/world position.
+function trackProgress(state, isFresh) {
+    const p = state?.performance;
+    const distance = p?.comparisonDistanceMetres;
+    const hasDistance = Number.isFinite(distance) && distance > 0;
+    const distanceLabel = hasDistance ? `${distance.toLocaleString('de-DE')} m` : '—';
+    const result = {
+        progress: null, distanceLabel, progressLabel: '—', lapLabel: '—',
+        status: 'Warte auf gemessene Laufbanddaten.',
+        description: 'Schematischer Rundenfortschritt. Keine räumliche Positionsmessung. Noch keine Messdaten.'
+    };
+    if (!isFresh) {
+        result.status = state ? 'Keine aktuellen Messdaten. Position ausgeblendet.' : 'App und Laufband verbinden, um deinen Fortschritt zu sehen.';
+        return result;
+    }
+    if (state.comparisonControlVersion !== 1 || !hasDistance) return result;
+    if (p.measurementStatus === 'NoSignal' || p.measurementStatus === 'Waiting') return result;
+    if (!['Measuring', 'Paused'].includes(p.measurementStatus) || p.lapValid !== true) {
+        result.status = 'Messung unterbrochen. Position erst bei gültigen Rundendaten verfügbar.';
+        return result;
+    }
+    const metres = p.lapDistanceMetres;
+    if (!Number.isFinite(metres) || metres < 0 || metres > distance ||
+        !Number.isFinite(p.measuredSeconds) || p.measuredSeconds <= 0 ||
+        !Number.isInteger(p.lapNumber) || p.lapNumber < 1) return result;
+    result.progress = metres / distance;
+    result.progressLabel = `${Math.round(result.progress * 100)} %`;
+    result.lapLabel = `Runde ${p.lapNumber}`;
+    result.status = `${metres.toLocaleString('de-DE', { maximumFractionDigits: 1 })} / ${distanceLabel}${p.measurementStatus === 'Paused' ? ' · Pausiert' : ' · Gemessen'}`;
+    result.description = `Schematischer Fortschritt: ${result.progressLabel}, ${result.lapLabel}. Aus Laufbanddaten, keine räumliche Ortung.`;
+    return result;
+}
+
+function clearCameraFrame() {
+    if (cameraFrameUrl) URL.revokeObjectURL(cameraFrameUrl);
+    cameraFrameUrl = null;
+    cameraFrameAt = 0;
+    $('cameraFrame').hidden = true;
+    $('cameraFrame').removeAttribute('src');
+    $('cameraEmpty').hidden = false;
+}
+function receiveCameraFrame(data) {
+    if (!fresh() || snapshot.state.camera?.enabled !== true) return;
+    const frame = new Blob([data], { type: 'image/jpeg' });
+    const next = URL.createObjectURL(frame);
+    const previous = cameraFrameUrl;
+    cameraFrameUrl = next;
+    const image = $('cameraFrame');
+    image.onload = () => {
+        if (cameraFrameUrl !== next || !fresh() || snapshot.state.camera?.enabled !== true) return;
+        cameraFrameAt = Date.now();
+        image.hidden = false;
+        $('cameraEmpty').hidden = true;
+        renderCameraControls();
+    };
+    image.onerror = () => {
+        if (cameraFrameUrl !== next) return;
+        clearCameraFrame();
+        $('cameraStatus').textContent = 'Kamerabild konnte nicht gelesen werden. Warte auf das nächste Bild.';
+    };
+    image.src = next;
+    if (previous) URL.revokeObjectURL(previous);
+}
+function renderCameraControls() {
+    const camera = snapshot?.state?.camera;
+    const supported = fresh() && snapshot.state.cameraControlVersion === 1 && camera?.supported;
+    const enabled = supported && camera.enabled === true;
+    $('cameraControls').disabled = !supported || Boolean(pending) || Boolean(snapshot?.pending);
+    $('startCamera').hidden = Boolean(enabled);
+    $('stopCamera').hidden = !enabled;
+    if (!enabled || (cameraFrameAt && Date.now() - cameraFrameAt > 3000)) clearCameraFrame();
+    const live = enabled && cameraFrameAt > 0;
+    $('cameraBadge').textContent = live ? 'Live' : enabled ? 'Verbinden …' : 'Aus';
+    $('cameraBadge').classList.toggle('online', Boolean(live));
+    const statuses = { RequestingPermission: 'Kameraberechtigung auf der Brille erlauben.', Starting: 'Kamera wird gestartet …', Streaming: 'Warte auf ein aktuelles Kamerabild.', Error: camera?.error || 'Kamera konnte nicht gestartet werden.', Stopped: 'Kamera auf der Brille starten.', Unsupported: 'Kamera nur im aktualisierten Magic-Leap-Gerätebuild verfügbar.' };
+    $('cameraStatus').textContent = !fresh() ? 'Aktualisierte Brillen-App verbinden.' : statuses[camera?.status] || 'Für die Kamera die aktualisierte Brillen-App installieren.';
+}
+$('startCamera').onclick = () => command('camera.start', {});
+$('stopCamera').onclick = () => command('camera.stop', {});
+window.addEventListener('pagehide', clearCameraFrame);
+
+function renderSessionSummary(state) {
+    const p = state?.performance;
+    const positive = value => Number.isFinite(value) && value > 0;
+    const distanceText = metres => metres < 1000 ? `${metres.toLocaleString('de-DE')} m` : `${(metres / 1000).toLocaleString('de-DE')} km`;
+    const valid = state?.comparisonControlVersion === 1 && positive(p?.comparisonDistanceMetres);
+    $('sessionResultDistance').textContent = valid ? distanceText(p.comparisonDistanceMetres) : '—';
+    $('sessionBestValue').textContent = valid && positive(p.sessionBestSeconds) ? durationText(p.sessionBestSeconds) : '—';
+    $('sessionPrValue').textContent = valid && positive(p.allTimeBestSeconds) ? durationText(p.allTimeBestSeconds) : '—';
+    const pr = sessionPrResult(p, valid);
+    $('sessionPrBadge').textContent = pr.label;
+    $('sessionPrBadge').classList.toggle('online', pr.confirmed);
+    $('sessionPrStatus').textContent = pr.description;
+    const body = $('sessionDistanceTimes');
+    body.replaceChildren();
+    if (!valid) { performanceRow(body, ['Noch keine gemessenen Zeiten', '—', '—']); return; }
+    const records = new Map();
+    for (const record of p.records || []) {
+        if (positive(record.distanceMetres) && positive(record.seconds)) records.set(record.distanceMetres, record.seconds);
+    }
+    if (positive(p.allTimeBestSeconds)) records.set(p.comparisonDistanceMetres, p.allTimeBestSeconds);
+    const distances = new Set(records.keys());
+    if (positive(p.sessionBestSeconds)) distances.add(p.comparisonDistanceMetres);
+    const ordered = [...distances].sort((a,b) => a - b);
+    const visible = ordered.includes(p.comparisonDistanceMetres)
+        ? [p.comparisonDistanceMetres, ...ordered.filter(distance => distance !== p.comparisonDistanceMetres)].slice(0, 4)
+        : ordered.slice(0, 4);
+    for (const distance of visible) performanceRow(body, [distanceText(distance), distance === p.comparisonDistanceMetres && positive(p.sessionBestSeconds) ? durationText(p.sessionBestSeconds) : '—', records.has(distance) ? durationText(records.get(distance)) : '—']);
+    if (!visible.length) performanceRow(body, ['Noch keine vollständige Distanz', '—', '—']);
+}
+function sessionPrResult(p, valid) {
+    const result = { label: 'Noch kein Ergebnis', description: 'Schließe eine gemessene Distanz ab. Es werden keine Zeiten hochgerechnet.', confirmed: false };
+    if (!valid) { result.description = 'Verbinde dein Laufband für gemessene Zeiten.'; return result; }
+    if (!(Number.isFinite(p.sessionBestSeconds) && p.sessionBestSeconds > 0)) return result;
+    if (p.sessionRecordVersion !== 1) {
+        result.label = 'Session gemessen';
+        result.description = 'Für die bestätigte PR-Meldung die aktualisierte Brillen-App installieren.';
+        return result;
+    }
+    if (!p.sessionNewPersonalBest) {
+        result.label = 'PR noch offen';
+        result.description = 'Die Bestzeit dieser Session hat den bisherigen Rekord noch nicht unterboten.';
+        return result;
+    }
+    if (!Number.isFinite(p.sessionPreviousBestSeconds) || p.sessionPreviousBestSeconds < 0 ||
+        (p.sessionPreviousBestSeconds > 0 && p.sessionBestSeconds >= p.sessionPreviousBestSeconds)) {
+        result.label = 'PR noch unbestätigt';
+        result.description = 'Warte auf einen konsistenten Rekordvergleich der Brille.';
+        return result;
+    }
+    if (p.storageError || p.savePending) {
+        result.label = 'PR noch unbestätigt';
+        result.description = p.storageError ? 'Neue Bestzeit gemessen. Speicherung auf der Brille fehlgeschlagen.' : 'Neue Bestzeit gemessen. Wird auf der Brille gespeichert …';
+        return result;
+    }
+    result.confirmed = true;
+    const previous = p.sessionPreviousBestSeconds;
+    result.label = previous > 0 ? 'PR geknackt' : 'Erster PR';
+    result.description = previous > p.sessionBestSeconds
+        ? `${(previous - p.sessionBestSeconds).toLocaleString('de-DE', { maximumFractionDigits: 1 })} Sekunden schneller als dein bisheriger Rekord.`
+        : 'Deine erste gemessene Bestzeit für diese Distanz ist gespeichert.';
+    return result;
+}

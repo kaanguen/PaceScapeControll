@@ -12,7 +12,7 @@ async function fixture(t, options = {}) {
     async function client(role, token = '') {
         const ws = new WebSocket(url.replace('http:', 'ws:') + '/ws');
         const messages = [], waiters = [];
-        ws.on('message', raw => { const m = JSON.parse(raw); messages.push(m); for (const wake of [...waiters]) wake(); });
+        ws.on('message', (raw, binary) => { const m = binary ? { type: 'camera-frame', data: raw } : JSON.parse(raw); messages.push(m); for (const wake of [...waiters]) wake(); });
         const next = (predicate = () => true) => new Promise((resolve, reject) => {
             const timeout = setTimeout(() => { waiters.splice(waiters.indexOf(check), 1); reject(new Error('Expected message timed out')); }, 1500);
             function check() {
@@ -210,4 +210,56 @@ test('ghost mode exposes only fixed pace and all-time PR references', async t =>
     }
     d.send(cmd('retired-input-selector', 'treadmill.manual', {}));
     assert.equal((await d.next(m => m.requestId === 'retired-input-selector')).success, false);
+});
+
+
+test('camera commands require capability and application acknowledgement', async t => {
+    const { dashboard: d, headset: h } = await connected(t);
+    d.send(cmd('camera-old', 'camera.start', {}));
+    assert.equal((await d.next(m => m.requestId === 'camera-old')).success, false);
+    h.send({ type: 'state', state: { cameraControlVersion: 1, camera: { enabled: false } } });
+    await d.next(m => m.state?.cameraControlVersion === 1);
+    for (const type of ['camera.start', 'camera.stop']) {
+        d.send(cmd(type, type, {}));
+        const forwarded = await h.next(m => m.type === 'command');
+        assert.equal(forwarded.commandType, type);
+        h.send({ type: 'ack', commandId: forwarded.commandId, success: true });
+        assert.equal((await d.next(m => m.requestId === type)).success, true);
+    }
+});
+
+test('JPEG frames relay only from the active enabled headset and do not change state freshness', async t => {
+    const { dashboard: d, headset: h, client } = await connected(t);
+    const frame = Buffer.from([0xff, 0xd8, 1, 2, 0xff, 0xd9]);
+    h.ws.send(frame);
+    assert.match((await h.next(m => m.type === 'error')).error, /not enabled/);
+    h.send({ type: 'state', state: { cameraControlVersion: 1, camera: { enabled: true } } });
+    const status = await d.next(m => m.state?.camera?.enabled);
+    d.ws.send(frame);
+    assert.match((await d.next(m => m.type === 'error')).error, /not enabled/);
+    h.ws.send(Buffer.from('not jpeg'));
+    assert.match((await h.next(m => m.type === 'error')).error, /JPEG/);
+    const largeFrame = Buffer.alloc(600 * 1024);
+    frame.copy(largeFrame);
+    frame.copy(largeFrame, largeFrame.length - frame.length);
+    h.ws.send(largeFrame);
+    assert.deepEqual((await d.next(m => m.type === 'camera-frame')).data, largeFrame);
+    // A subsequent status still carries only telemetry, not an image or a new timestamp.
+    const observer = await client('dashboard');
+    const observed = await observer.next(m => m.state?.camera?.enabled);
+    assert.equal(observed.updatedAt, status.updatedAt);
+    assert.equal(Object.hasOwn(observed.state.camera, 'frame'), false);
+    h.send({ type: 'state', state: { cameraControlVersion: 1, camera: { enabled: false } } });
+    await d.next(m => m.state?.camera?.enabled === false);
+    h.ws.send(frame);
+    assert.match((await h.next(m => m.type === 'error')).error, /not enabled/);
+});
+
+test('camera frames are rejected when headset telemetry is stale', async t => {
+    const { dashboard: d, headset: h } = await connected(t, { staleTimeout: 20 });
+    h.send({ type: 'state', state: { cameraControlVersion: 1, camera: { enabled: true } } });
+    await d.next(m => m.state?.camera?.enabled);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    h.ws.send(Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    assert.match((await h.next(m => m.type === 'error')).error, /not enabled/);
 });

@@ -92,3 +92,17 @@ The existing simulator exercises settings and demo targets but does not generate
 ## Ghost-only avatar
 
 The avatar is an independent ghost with exactly two references: `FixedPace` (default, preset speed) and `AllTimePersonalBest` (the persisted distance record, average pace). Clients advertise `ghostControlVersion: 1`; both dashboard selection and the relay require this capability. `FollowInput`, `TempoRunner`, side-by-side modes and `treadmill.manual` are rejected. The BLE panel is exclusively for user measurement. The ghost never directly follows live belt speed or a current-run best. User progress and records never derive from ghost motion. Existing tracking/app/server pause rules remain active. Mode changes pause without rewinding; reset retains the selected reference. A side-by-side companion is deferred.
+
+## Camera preview (version 1)
+
+Updated headsets advertise `cameraControlVersion: 1` and `camera: { supported, enabled, status, error }`. `camera.start` and `camera.stop` accept exactly `{}` and use normal request/acknowledgement handling. Start acknowledgement confirms the request; permission, device readiness and actual frames are asynchronous. Status is `Unsupported`, `Stopped`, `RequestingPermission`, `Starting`, `Streaming` or `Error`.
+
+The headset requests Android CAMERA permission only after an explicit start. It captures Main-camera mixed-reality JPEG stills at up to two frames per second, 960×720 when supported, using the camera's default JPEG quality. Capture stops on application pause/disable, connection loss or stop, and is never automatically restarted. A new device build and server restart are required. Hardware capture and tracking coexistence still require verification on Magic Leap 2.
+
+Each JPEG is a binary message on the existing headset WebSocket. The server accepts frames only from the active headset, with fresh state and `camera.enabled: true`, checks JPEG boundary bytes and a 2-MiB size limit, and forwards at most one frame per 400 ms. JSON remains limited to 16 KiB. Slow dashboard sockets drop frames; frames are not retained or replayed. The browser hides disabled, disconnected or stale images after three seconds. This is a preview, not a recorded video or a pose/skeleton stream.
+
+## Dashboard progress and session records
+
+The dashboard maps `performance.lapDistanceMetres / performance.comparisonDistanceMetres` onto a schematic oval. This represents measured treadmill progress in the selected comparison distance, not physical position on a real track. Missing, stale or invalid measurements hide the marker; no position is inferred from ghost pace.
+
+Updated headsets include `performance.sessionRecordVersion: 1`, `sessionPreviousBestSeconds` (the real record at the last session reset, zero if absent) and `sessionNewPersonalBest` (true only after a measured best improves the real record book). The dashboard confirms a new PR only with these explicit fields, a positive measured session best and successful storage (`savePending: false`, no `storageError`). A first record is distinguished from a faster previous record. Legacy clients show measured times without asserting a new PR. Distance rows use actual selected-distance session bests and saved measured records; times for unmeasured distances are not extrapolated.
