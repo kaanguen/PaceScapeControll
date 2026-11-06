@@ -47,7 +47,7 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {
     };
     const server = http.createServer(async (req, res) => {
         const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'" };
-        const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+        const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/assets/session-track.jpg': ['assets/session-track.jpg', 'image/jpeg'] };
         if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405, headers); res.end(); return; }
         const path = new URL(req.url, 'http://localhost').pathname;
         const asset = assets[path];

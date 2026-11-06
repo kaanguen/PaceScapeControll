@@ -1,14 +1,17 @@
 <div align="center">
 
-  <img src="docs/assets/pacescape-logo.png" alt="PaceScape" width="520">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pacescape-logo-dark.svg">
+    <img src="docs/assets/pacescape-logo-light.svg" alt="PaceScape – Läufer mit AR-Brille" width="440">
+  </picture>
 
   <h3>Dein Lauftraining. Direkt unter Kontrolle.</h3>
   <p>PaceScape Control · Die lokale Steuerungswebsite für deine Magic Leap 2.</p>
 
   <img src="https://img.shields.io/badge/Node.js-22%2B-222222?style=flat-square" alt="Node.js 22 oder neuer">
-  <img src="https://img.shields.io/badge/Verbindung-WebSocket-5EEAD4?style=flat-square" alt="WebSocket">
-  <img src="https://img.shields.io/badge/Headset-Magic_Leap_2-00CDB5?style=flat-square" alt="Magic Leap 2">
-  <img src="https://img.shields.io/badge/Status-Früher_Prototyp-7952FF?style=flat-square" alt="Status: Früher Prototyp">
+  <img src="https://img.shields.io/badge/Verbindung-WebSocket-55555f?style=flat-square" alt="WebSocket">
+  <img src="https://img.shields.io/badge/Headset-Magic_Leap_2-55555f?style=flat-square" alt="Magic Leap 2">
+  <img src="https://img.shields.io/badge/Status-Früher_Prototyp-55555f?style=flat-square" alt="Status: Früher Prototyp">
 
   <br><br>
   <a href="#die-idee">Die Idee</a> &nbsp;·&nbsp;
@@ -33,13 +36,13 @@ Die App für die Magic Leap 2 und der Unity-WebSocket-Client liegen im separaten
 | :---: | :---: | :---: |
 | Pace, Spur und Startposition gemeinsam einstellen. | Platzierten Läufer bewusst starten, pausieren und zurücksetzen. | Trackingphase, Marker und Meldungen direkt sehen. |
 
-Das Dashboard nutzt ein schlichtes Dark-Mode-Design mit türkisfarbenen Akzenten, Seitenleiste und schematischer Laufbahnübersicht. Die Grafik zeigt die bestätigte Laufspur; sie ist keine Live-Positionsmessung.
+Das Dashboard nutzt ein schlichtes Dark-Mode-Design mit neutralen Grautönen und den Bereichen Dashboard, Konfiguration, Analyse und Hilfe. Die Kameraansicht zeigt derzeit ein gekennzeichnetes Titelbild. Die schematische Laufbahn in der Konfiguration zeigt die bestätigte Laufspur; sie ist keine Live-Positionsmessung.
 
 <details>
   <summary>Dashboard ansehen</summary>
   <br>
-  <img src="docs/assets/dashboard-preview.png" alt="PaceScape Control im Dark Mode mit schematischer Laufbahn, Status und Steuerungskarten. Die abgebildeten Werte stammen aus der Test-Brille." width="1100">
-  <p><em>Vorschau mit ausdrücklich gekennzeichneter Simulation, ohne echte Brillen- oder Trainingsdaten.</em></p>
+  <img src="docs/assets/dashboard-preview.png" alt="PaceScape Control mit AR-Läufer-Logo, neutralem Dark Mode und offline geschaltetem Gerätestatus." width="1100">
+  <p><em>Offline-Vorschau ohne echte Brillen- oder Trainingsdaten. Das Laufmotiv ist ein Titelbild, keine Live-Kameraübertragung.</em></p>
 </details>
 
 ## Entwicklungsstand

@@ -334,11 +334,30 @@ document.querySelectorAll('[data-select-lane]').forEach(chip => {
         controls();
     });
 });
-document.querySelectorAll('.nav-link').forEach(link => {
-    link.addEventListener('click', () => {
-        document.querySelectorAll('.nav-link').forEach(item => item.classList.toggle('active', item === link));
-        const target = document.querySelector(link.getAttribute('href'));
-        const details = target?.id === 'connectionSettings' ? target.querySelector('details') : null;
-        if (details) details.open = true;
+// Views keep the existing controls mounted so connection and form state survive navigation.
+const viewCopy = {
+    overview: ['Übersicht', 'Deine Session auf einen Blick.', 'Dashboard'],
+    configuration: ['Konfiguration', 'Ghost, Strecke und Geräteeinstellungen.', 'Konfiguration'],
+    analysis: ['Analyse', 'Runden, Bewegung und persönliche Bestleistungen.', 'Analyse'],
+    help: ['Support & Verbindung', 'Einrichtung und Aktivitätsprotokoll.', 'Hilfe']
+};
+function showView() {
+    const hash = location.hash.slice(1) || 'overview';
+    const aliases = { controls: 'configuration', settings: 'configuration', connectionSettings: 'configuration', activity: 'help' };
+    const view = viewCopy[hash] ? hash : aliases[hash] || 'overview';
+    document.querySelectorAll('.app-view').forEach(panel => { panel.hidden = panel.id !== view; });
+    document.querySelectorAll('.nav-link').forEach(link => {
+        const active = link.getAttribute('href') === '#' + view;
+        link.classList.toggle('active', active);
+        if (active) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
     });
-});
+    $('pageTitle').textContent = viewCopy[view][0];
+    $('pageSubtitle').textContent = viewCopy[view][1];
+    document.querySelector('.breadcrumb strong').textContent = viewCopy[view][2];
+    if (hash === 'connectionSettings') {
+        $('connectionSettings').querySelector('details').open = true;
+        $('connectionSettings').scrollIntoView({ block: 'center' });
+    } else window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', showView);
+showView();
