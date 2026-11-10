@@ -30,3 +30,17 @@ test('preserves and labels the last valid measurement while paused', () => {
     assert.match(result.status, /Pausiert/);
     assert.match(result.description, /keine räumliche Ortung/);
 });
+
+test('shows independent ghost progress while running without a current belt measurement', () => {
+    const running = { ...state({ measurementStatus: 'NoSignal', ghostDistanceMetres: 450 }), runState: 'Running' };
+    assert.equal(trackProgress(running, true).ghostProgress, .125);
+    assert.equal(trackProgress(running, true).progress, null);
+    assert.equal(trackProgress(running, false).ghostProgress, null);
+    assert.equal(trackProgress({ ...running, runState: 'Ready' }, true).ghostProgress, null);
+});
+
+test('uses the shared comparison gap to show an overtake across the lap boundary', () => {
+    const paused = { ...state({ measurementStatus: 'Paused', lapDistanceMetres: 10, ghostDistanceMetres: 180,
+        hasProgressComparison: true, userLeadMetres: 30 }), runState: 'Paused' };
+    assert.equal(trackProgress(paused, true).ghostProgress, .95);
+});

@@ -4,7 +4,7 @@ let queuedPace = null, paceTimer, selectedPace = 6;
 let cameraFrameUrl = null, cameraFrameAt = 0;
 const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
 $('siteUrl').textContent = location.origin; $('wsUrl').textContent = wsUrl;
-const names = { 'camera.start': 'Kamera starten', 'camera.stop': 'Kamera stoppen', 'runner.comparison': 'Vergleichsdistanz ändern', 'runner.mode': 'Läufermodus ändern', 'treadmill.scan': 'Bluetooth suchen', 'treadmill.scan.stop': 'Suche stoppen', 'treadmill.connect': 'Laufband verbinden', 'treadmill.disconnect': 'Laufband trennen', 'runner.create': 'Läufer spawnen', 'runner.remove': 'Läufer entfernen', 'runner.configure': 'Läufer einstellen', 'run.start': 'Lauf starten', 'run.pause': 'Lauf pausieren', 'run.resume': 'Weiterlaufen', 'run.reset': 'Lauf zurücksetzen', 'runner.pace': 'Pace ändern', 'runner.spawn': 'Startposition ändern', 'tracking.start': 'Tracking starten', 'tracking.stop': 'Tracking stoppen', 'tracking.retry': 'Tracking neu starten', 'tracking.configure': 'Erkennung konfigurieren', 'placement.configure': 'Platzierung konfigurieren' };
+const names = { 'camera.start': 'Kamera starten', 'camera.stop': 'Kamera stoppen', 'runner.comparison': 'Vergleichsdistanz ändern', 'runner.mode': 'Läufermodus ändern', 'runner.presentation': 'Ghost-Darstellung ändern', 'runner.calibrate': 'Laufbandplatz kalibrieren', 'treadmill.pauseRun': 'Lauf und Laufband pausieren', 'treadmill.stopRun': 'Lauf beenden und Laufband stoppen', 'treadmill.resumeRun': 'Lauf und Laufband fortsetzen', 'treadmill.startRun': 'Lauf und Laufband starten', 'treadmill.speed': 'Laufbandtempo übernehmen', 'treadmill.readSpeedRange': 'Tempobereich abfragen', 'treadmill.scan': 'Bluetooth suchen', 'treadmill.scan.stop': 'Suche stoppen', 'treadmill.connect': 'Laufband verbinden', 'treadmill.disconnect': 'Laufband trennen', 'runner.create': 'Läufer spawnen', 'runner.remove': 'Läufer entfernen', 'runner.configure': 'Läufer einstellen', 'run.start': 'Lauf starten', 'run.pause': 'Lauf pausieren', 'run.resume': 'Weiterlaufen', 'run.reset': 'Lauf zurücksetzen', 'runner.pace': 'Pace ändern', 'runner.spawn': 'Startposition ändern', 'tracking.start': 'Tracking starten', 'tracking.stop': 'Tracking stoppen', 'tracking.retry': 'Tracking neu starten', 'tracking.configure': 'Erkennung konfigurieren', 'placement.configure': 'Platzierung konfigurieren' };
 const phases = { Stopped: 'Gestoppt', Ready: 'Bereit', Failed: 'Fehler', UnsupportedPlatform: 'Editor / nicht unterstützt', WaitingForScene: 'Szene laden', CheckingConfiguration: 'Konfiguration prüfen', RequestingPermissions: 'Berechtigungen anfragen', WaitingForOpenXR: 'Warten auf OpenXR', CheckingFeatures: 'XR-Funktionen prüfen', StartingSubsystems: 'Subsysteme starten', StartingMarkerDetector: 'Markererkennung starten', Suspended: 'Unterbrochen', Recovering: 'Wiederherstellung' };
 function log(message) {
     const li = document.createElement('li'), time = document.createElement('time');
@@ -14,6 +14,15 @@ function log(message) {
 function notice(message, failure = false) { $('notice').textContent = message; $('notice').classList.toggle('failure', failure); }
 function fresh() { return socket?.readyState === WebSocket.OPEN && snapshot?.headsetConnected && snapshot.state && Date.now() - snapshot.updatedAt < 5000; }
 function controls() {
+    const belt = fresh() ? snapshot.state.treadmill : null;
+    const controlPoint = $('treadmillControlPoint');
+    controlPoint.hidden = !belt?.connected || typeof belt.hasFtmsControlPoint !== 'boolean';
+    controlPoint.textContent = controlPoint.hidden ? '' : belt.hasFtmsControlPoint
+        ? 'FTMS-Steuerkanal erkannt. Fernstart am Gerät unbestätigt.'
+        : 'Kein FTMS-Steuerkanal erkannt.';
+    $('userSpeedValue').textContent = belt?.connected && belt.hasSpeed && Number.isFinite(belt.speedKmh)
+        ? belt.speedKmh.toLocaleString('de-DE', { maximumFractionDigits: 2 })
+        : '—';
     document.querySelectorAll('fieldset').forEach(field => { field.disabled = !fresh() || Boolean(pending) || Boolean(snapshot?.pending); });
     if (fresh() && !pending && !snapshot.pending) {
         $('startTracking').disabled = snapshot.state.testScene || snapshot.state.trackingEnabled;
@@ -38,6 +47,7 @@ function controls() {
         chip.disabled = $('lane').matches(':disabled');
         chip.setAttribute('aria-pressed', String(chip.dataset.selectLane === $('lane').value));
     });
+    updateGhostPresentation();
     const treadmill = snapshot?.state?.treadmill;
     $('comparisonForm').querySelector('fieldset').disabled = !fresh() || Boolean(pending) || Boolean(snapshot?.pending) || snapshot?.state?.comparisonControlVersion !== 1 || snapshot.state.runState === 'Running';
     $('comparisonPreset').disabled = snapshot?.state?.runState !== 'Ready';
@@ -47,6 +57,7 @@ function controls() {
     $('livePaceForm').querySelector('fieldset').disabled = !fresh() || snapshot?.state?.ghostControlVersion !== 1;
     const bluetoothReady = fresh() && !pending && !snapshot.pending && snapshot.state.treadmillControlVersion === 1 && treadmill?.supported;
     $('treadmillControls').disabled = !bluetoothReady;
+    updateBeltControls(belt, bluetoothReady);
     $('treadmillScan').disabled = treadmill?.scanning || treadmill?.busy || treadmill?.connected;
     $('treadmillStopScan').disabled = !treadmill?.scanning;
     $('treadmillConnect').disabled = !treadmill?.devices?.length || !$('treadmillDevices').value || treadmill?.busy || treadmill?.connected || treadmill?.scanning;
@@ -55,6 +66,25 @@ function controls() {
     if (snapshot?.headsetConnected && !fresh()) notice('App-Status veraltet. Warte auf ein neues Update.', true);
     renderMiniTrack();
     renderCameraControls();
+}
+function updateGhostPresentation() {
+    const state = snapshot?.state;
+    const supported = snapshot?.ghostPresentationControlVersion === 1 &&
+        state?.ghostPresentationVersion === 1 && !state.testScene && !state.isSimulation;
+    const presentation = supported ? state.ghostPresentation : null;
+    const relative = presentation?.mode === 'TreadmillRelative';
+    const ready = fresh() && presentation && state.runState === 'Ready' && !pending && !snapshot.pending;
+    const calibrate = $('calibrateGhostPresentation');
+    $('ghostPresentationForm').querySelector('fieldset').disabled = !ready;
+    calibrate.hidden = !relative;
+    calibrate.disabled = !ready || state.placedMarkers !== 1 || state.runnableMarkers !== 1;
+    sync('ghostPresentationMode', presentation?.mode);
+    $('ghostPresentationHelp').textContent = !presentation
+        ? 'Ghost-Darstellung benötigt den aktuellen Server und eine App mit Tracking.'
+        : state.runState !== 'Ready' ? 'Darstellung kann vor dem Lauf oder nach dem Zurücksetzen geändert werden.'
+        : !relative ? 'Aktiv: Stadion. Für einen relativen Ghost „Laufband“ wählen und übernehmen.'
+        : presentation.calibrated ? 'Aktiv: Laufband · kalibriert. Zum Start sind frische Laufbanddaten erforderlich.'
+        : 'Aktiv: Laufband. Genau einen Marker platzieren, am Laufband in Laufrichtung schauen und kalibrieren.';
 }
 function sync(id, value) {
     const input = $(id);
@@ -97,7 +127,11 @@ function render(message) {
     const runNames = { Ready: 'Bereit', Running: 'Läuft', Paused: 'Pausiert' };
     $('runState').textContent = supported ? runNames[s.runState] || 'Unbekannt' : s ? 'App aktualisieren' : 'Keine App verbunden';
     $('runState').classList.toggle('online', supported && s.runState === 'Running');
-    $('pauseRun').textContent = s?.runState === 'Paused' ? 'Weiterlaufen' : 'Pause';
+    const motorMode = message.motorStartEnabled === true && !s?.testScene;
+    $('pauseRun').textContent = s?.runState === 'Paused'
+        ? (motorMode ? 'Lauf fortsetzen' : 'Ghost weiterlaufen')
+        : (motorMode ? 'Lauf pausieren' : 'Ghost pausieren');
+    $('resetRun').textContent = motorMode ? 'Lauf beenden' : 'Ghost zurücksetzen';
     $('runHelp').textContent = !s ? 'App verbinden, Läufer einstellen und Marker platzieren. Der Läufer wartet auf deinen Start.'
         : !supported ? 'Für die Laufsteuerung die aktualisierte App neu bauen und auf der Brille installieren.'
         : s.runState === 'Running' ? 'Der Lauf läuft. Pace kannst du live ändern. Pause hält die Position; Zurücksetzen beendet den Lauf.'
@@ -182,18 +216,116 @@ function runnerSettings() {
 bind('comparisonForm', 'runner.comparison', () => ({ comparisonDistanceMetres: $('comparisonPreset').value === '400' ? 400 : Math.round(Number($('comparisonKm').value) * 1000), useDemoRecords: $('useDemoRecords').checked }));
 $('comparisonPreset').addEventListener('change', () => { $('customDistanceLabel').hidden = $('comparisonPreset').value !== 'custom'; });
 bind('runnerModeForm', 'runner.mode', () => ({ runnerMode: $('runnerMode').value }));
+bind('ghostPresentationForm', 'runner.presentation', () => ({
+    presentationMode: $('ghostPresentationMode').value,
+    sideOffsetMetres: snapshot.state.ghostPresentation.sideOffsetMetres,
+    visibilityDistanceMetres: snapshot.state.ghostPresentation.visibilityDistanceMetres
+}));
+$('calibrateGhostPresentation').onclick = () => command('runner.calibrate', {});
 bind('runnerForm', 'runner.configure', runnerSettings);
+function updateBeltControls(belt, bluetoothReady) {
+    const motorMode = snapshot?.motorStartEnabled === true && !snapshot.state?.testScene;
+    const canControlBelt = motorMode && belt?.motorStartVersion >= 3 && belt.connected &&
+        belt.hasFtmsControlPoint && belt.hasSpeed;
+    if (motorMode && !canControlBelt) $('startRun').disabled = true;
+    const canPauseStop = snapshot?.motorPauseStopEnabled === true && belt?.motorStartVersion >= 4 &&
+        belt.connected && belt.hasFtmsControlPoint;
+    if (motorMode) {
+        $('resetRun').disabled = !bluetoothReady || !canPauseStop;
+        $('pauseRun').disabled = !bluetoothReady || !canPauseStop ||
+            (snapshot.state.runState !== 'Running' &&
+                !(snapshot.state.runState === 'Paused' && snapshot.state.canRun && belt.hasSpeed));
+    }
+    const slider = $('beltSpeedTarget');
+    const min = belt?.minSpeedUnits || belt?.speedStepUnits;
+    const hasRange = canControlBelt && belt.speedStepUnits > 0 && min <= belt.maxSpeedUnits;
+    const canAdjust = bluetoothReady && hasRange && belt.speedKmh > 0;
+    const canLoadRange = bluetoothReady && canControlBelt && belt.canReadSpeedRange && belt.speedKmh === 0 && !hasRange;
+    $('beltSpeedControls').disabled = !canAdjust && !canLoadRange;
+    $('readBeltSpeedRange').hidden = !motorMode || hasRange;
+    $('readBeltSpeedRange').disabled = !canLoadRange;
+    slider.disabled = !canAdjust;
+    $('applyBeltSpeed').disabled = !canAdjust;
+    if (hasRange) {
+        const rangeChanged = Number(slider.min) !== min || Number(slider.max) !== belt.maxSpeedUnits ||
+            Number(slider.step) !== belt.speedStepUnits;
+        if (rangeChanged) {
+            slider.min = min;
+            slider.max = belt.maxSpeedUnits;
+            slider.step = belt.speedStepUnits;
+        }
+        if (rangeChanged || slider.dataset.deviceId !== belt.deviceId) delete slider.dataset.dirty;
+        slider.dataset.deviceId = belt.deviceId;
+        if (!slider.dataset.dirty) slider.value = Math.round(belt.speedKmh * 100);
+    } else {
+        delete slider.dataset.deviceId;
+        delete slider.dataset.dirty;
+    }
+    $('beltSpeedOutput').textContent = hasRange ? formatBeltTarget(slider.value) : '—';
+    $('beltSpeedHelp').textContent = !motorMode ? 'Für die Laufbandsteuerung das Dashboard am Server-Mac öffnen und USB oder WLAN freischalten.'
+        : !canPauseStop ? 'Für Laufband-Pause und Laufende Server neu starten und die aktuelle Brillen-App verbinden.'
+        : !canControlBelt ? 'FTMS-Laufband mit frischem Tempowert verbinden.'
+        : !hasRange ? (belt.canReadSpeedRange
+            ? 'Den optionalen Tempobereich bei stehendem Laufband laden.'
+            : 'Der FTMS-Tempobereich ist noch nicht verfügbar.')
+        : belt.speedKmh === 0 ? 'Lauf starten startet auch das Laufband. Danach kannst du das Tempo ändern.'
+        : 'Der Regler sendet erst bei „Tempo übernehmen“. Bei fehlender Bestätigung an der Laufbandkonsole stoppen.';
+}
+function formatBeltTarget(value) {
+    return `${(Number(value) / 100).toLocaleString('de-DE', { maximumFractionDigits: 2 })} km/h`;
+}
+$('beltSpeedTarget').oninput = event => { $('beltSpeedOutput').textContent = formatBeltTarget(event.target.value); };
+$('readBeltSpeedRange').onclick = () => {
+    const deviceId = snapshot?.state?.treadmill?.deviceId;
+    if (deviceId) command('treadmill.readSpeedRange', { deviceId });
+};
+$('applyBeltSpeed').onclick = () => {
+    const deviceId = snapshot?.state?.treadmill?.deviceId;
+    const targetSpeedUnits = Number($('beltSpeedTarget').value);
+    if (!deviceId || !confirm(`Laufbandtempo auf ${formatBeltTarget(targetSpeedUnits)} ändern?`)) return;
+    command('treadmill.speed', { deviceId, targetSpeedUnits });
+};
 $('startRun').onclick = () => {
     if (!$('runnerForm').reportValidity()) return;
-    try { command('run.start', runnerSettings(), $('runnerForm')); } catch (error) { notice(error.message, true); }
+    try {
+        const settings = runnerSettings();
+        const belt = snapshot?.state?.treadmill;
+        const startsBelt = snapshot?.motorStartEnabled === true && !snapshot.state?.testScene && belt?.speedKmh === 0;
+        if (startsBelt) {
+            if (!confirm('Das Laufband kann jetzt anlaufen. Ist das Band frei und der Sicherheitsstopp erreichbar?')) return;
+            command('treadmill.startRun', { ...settings, deviceId: belt.deviceId }, $('runnerForm'));
+        } else {
+            command('run.start', settings, $('runnerForm'));
+        }
+    } catch (error) { notice(error.message, true); }
 };
 $('spawnRunner').onclick = () => {
     if (!$('runnerForm').reportValidity()) return;
     try { command('runner.create', runnerSettings(), $('runnerForm')); } catch (error) { notice(error.message, true); }
 };
 $('removeRunner').onclick = () => command('runner.remove', {});
-$('pauseRun').onclick = () => command(snapshot?.state?.runState === 'Paused' ? 'run.resume' : 'run.pause', {});
-$('resetRun').onclick = () => command('run.reset', {});
+$('pauseRun').onclick = () => {
+    const state = snapshot?.state;
+    const resumes = state?.runState === 'Paused';
+    if (snapshot?.motorStartEnabled !== true || state?.testScene) {
+        command(resumes ? 'run.resume' : 'run.pause', {});
+        return;
+    }
+
+    const belt = state?.treadmill;
+    if (resumes && belt?.hasSpeed && belt.speedKmh > 0) {
+        command('run.resume', {});
+    } else if (!resumes || confirm('Das Laufband kann wieder anlaufen. Lauf fortsetzen?')) {
+        command(resumes ? 'treadmill.resumeRun' : 'treadmill.pauseRun', { deviceId: belt?.deviceId });
+    }
+};
+$('resetRun').onclick = () => {
+    if (snapshot?.motorStartEnabled === true && !snapshot.state?.testScene) {
+        command('treadmill.stopRun', { deviceId: snapshot.state?.treadmill?.deviceId });
+    } else {
+        command('run.reset', {});
+    }
+};
 bind('trackingForm', 'tracking.configure', () => ({ markerLength: Number($('markerLength').value), startupTimeoutSeconds: Number($('timeout').value), maxTrackedMarkers: Number($('capacity').value) }), true);
 bind('placementForm', 'placement.configure', () => ({ placeOnFloor: $('floor').checked, queryPadding: Number($('padding').value), maxMarkerPlaneDistance: Number($('planeDistance').value), minimumNormalAlignment: Number($('alignment').value) }), true);
 $('startTracking').onclick = () => command('tracking.start', {});
@@ -377,12 +509,15 @@ function renderMiniTrack() {
     $('miniTrackLap').textContent = view.lapLabel;
     $('miniTrackStatus').textContent = view.status;
     $('miniTrackDescription').textContent = view.description;
-    const marker = $('miniUserMarker');
-    marker.setAttribute('visibility', view.progress === null ? 'hidden' : 'visible');
-    if (view.progress !== null) {
-        const path = $('miniTrackPath');
-        const point = path.getPointAtLength(path.getTotalLength() * view.progress);
-        marker.setAttribute('transform', `translate(${point.x} ${point.y})`);
+    const path = $('miniTrackPath');
+    const pathLength = path.getTotalLength();
+    for (const [id, progress] of [['miniGhostMarker', view.ghostProgress], ['miniUserMarker', view.progress]]) {
+        const marker = $(id);
+        marker.setAttribute('visibility', progress === null ? 'hidden' : 'visible');
+        if (progress !== null) {
+            const point = path.getPointAtLength(pathLength * progress);
+            marker.setAttribute('transform', `translate(${point.x} ${point.y})`);
+        }
     }
     $('dashboardSpeedHint').textContent = state?.runnerMode === 'AllTimePersonalBest'
         ? 'PR-Modus aktiv. Der Regler ändert nur das voreingestellte Ersatztempo.'
@@ -396,7 +531,7 @@ function trackProgress(state, isFresh) {
     const hasDistance = Number.isFinite(distance) && distance > 0;
     const distanceLabel = hasDistance ? `${distance.toLocaleString('de-DE')} m` : '—';
     const result = {
-        progress: null, distanceLabel, progressLabel: '—', lapLabel: '—',
+        progress: null, ghostProgress: null, distanceLabel, progressLabel: '—', lapLabel: '—',
         status: 'Warte auf gemessene Laufbanddaten.',
         description: 'Schematischer Rundenfortschritt. Keine räumliche Positionsmessung. Noch keine Messdaten.'
     };
@@ -405,6 +540,12 @@ function trackProgress(state, isFresh) {
         return result;
     }
     if (state.comparisonControlVersion !== 1 || !hasDistance) return result;
+    const hasGhost = ['Running', 'Paused'].includes(state.runState) &&
+        Number.isFinite(p.ghostDistanceMetres) && p.ghostDistanceMetres >= 0;
+    if (hasGhost) {
+        result.ghostProgress = (p.ghostDistanceMetres % distance) / distance;
+        result.description = 'Schematischer Fortschritt des Ghosts. Keine räumliche Ortung.';
+    }
     if (p.measurementStatus === 'NoSignal' || p.measurementStatus === 'Waiting') return result;
     if (!['Measuring', 'Paused'].includes(p.measurementStatus) || p.lapValid !== true) {
         result.status = 'Messung unterbrochen. Position erst bei gültigen Rundendaten verfügbar.';
@@ -415,10 +556,15 @@ function trackProgress(state, isFresh) {
         !Number.isFinite(p.measuredSeconds) || p.measuredSeconds <= 0 ||
         !Number.isInteger(p.lapNumber) || p.lapNumber < 1) return result;
     result.progress = metres / distance;
+    if (hasGhost && p.hasProgressComparison === true && Number.isFinite(p.userLeadMetres)) {
+        const ghostMetres = metres - p.userLeadMetres;
+        result.ghostProgress = ((ghostMetres % distance + distance) % distance) / distance;
+    }
     result.progressLabel = `${Math.round(result.progress * 100)} %`;
     result.lapLabel = `Runde ${p.lapNumber}`;
     result.status = `${metres.toLocaleString('de-DE', { maximumFractionDigits: 1 })} / ${distanceLabel}${p.measurementStatus === 'Paused' ? ' · Pausiert' : ' · Gemessen'}`;
     result.description = `Schematischer Fortschritt: ${result.progressLabel}, ${result.lapLabel}. Aus Laufbanddaten, keine räumliche Ortung.`;
+    if (hasGhost) result.description += ' Violett zeigt den Ghost, blau deinen Fortschritt.';
     return result;
 }
 

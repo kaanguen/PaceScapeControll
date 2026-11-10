@@ -415,6 +415,8 @@ footer { font-size:9px; color:#666670; padding:25px 0; }
 .mini-marker { fill:#a7cbfa; stroke:#242426; stroke-width:2; }
 .mini-track-legend { display:flex; justify-content:space-between; gap:8px; color:#aaaab3; font-size:9px; }
 .mini-track-legend i { display:inline-block; width:5px; height:5px; background:#a7cbfa; border-radius:50%; margin-right:5px; }
+.mini-ghost-marker { fill:none; stroke:#d19aff; stroke-width:3; }
+.mini-track-legend .mini-ghost-key { background:#d19aff; }
 .mini-track-panel .help { font-size:10px; margin-top:13px; line-height:1.7; }
 .mini-track-disclaimer { font-size:8px; color:#777781; margin:5px 0 0; }
 .speed-settings-link,.speed-dashboard-link { color:#adb7c8; text-decoration:none; font-size:10px; }
@@ -463,3 +465,6 @@ footer { font-size:9px; color:#666670; padding:25px 0; }
 .session-performance th,.session-performance td { font-size:10px; padding:11px 3px; }
 @media(max-width:1150px) { .session-preview-grid { gap:10px; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr); } .preview-header { padding:12px; } .preview-header .badge { font-size:8px; } }
 @media(max-width:540px) { .session-preview-grid { grid-template-columns:1fr 1fr; gap:10px; } .session-preview-grid .camera-panel,.skeleton-preview { height:260px; } .preview-header { padding:12px 10px; flex-wrap:wrap; } .preview-header h2 { font-size:11px; } .camera-toolbar { padding:9px; flex-wrap:wrap; } .camera-toolbar>span { font-size:7px; } .skeleton-placeholder { height:140px; } .skeleton-preview>p { font-size:9px; } .skeleton-disclaimer { font-size:7px; } .session-performance { padding:18px; } .session-results { gap:12px; } .session-results strong { font-size:25px; } }
+
+.belt-speed-controls { grid-column: 1 / -1; }
+.belt-speed-controls input[type="range"] { width: 100%; accent-color: var(--accent); }

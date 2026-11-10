@@ -6,18 +6,32 @@ import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 
 const root = dirname(fileURLToPath(import.meta.url));
+const hostIsLoopback = host => /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host ?? '');
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const range = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
 const maxCameraFrameBytes = 2 * 1024 * 1024;
 const runnerSettings = p => range(p.paceMinutesPerKilometre, 0.1, 60) && Number.isInteger(p.spawnLane) && range(p.spawnLane, 1, 8) && range(p.distanceBehindStartLine, 0, 1000);
+const motorDevice = p => typeof p.deviceId === 'string' && p.deviceId.length > 0 && p.deviceId.length <= 256;
 export const commands = {
     'camera.start': p => Object.keys(p).length === 0,
     'camera.stop': p => Object.keys(p).length === 0,
     'runner.comparison': p => Number.isInteger(p.comparisonDistanceMetres) && range(p.comparisonDistanceMetres, 1, 1000000) && typeof p.useDemoRecords === 'boolean' && Object.keys(p).length === 2,
+    'runner.presentation': p => Object.keys(p).length === 3 &&
+        ['Track', 'TreadmillRelative'].includes(p.presentationMode) &&
+        (range(p.sideOffsetMetres, -5, -0.5) || range(p.sideOffsetMetres, 0.5, 5)) &&
+        range(p.visibilityDistanceMetres, 1, 100),
+    'runner.calibrate': p => Object.keys(p).length === 0,
     'runner.mode': p => ['FixedPace', 'AllTimePersonalBest'].includes(p.runnerMode) && Object.keys(p).length === 1,
     'treadmill.scan': p => Object.keys(p).length === 0,
     'treadmill.scan.stop': p => Object.keys(p).length === 0,
     'treadmill.connect': p => typeof p.deviceId === 'string' && p.deviceId.trim().length > 0 && p.deviceId.length <= 256 && Object.keys(p).length === 1,
+    'treadmill.readSpeedRange': p => motorDevice(p) && Object.keys(p).length === 1,
+    'treadmill.pauseRun': p => motorDevice(p) && Object.keys(p).length === 1,
+    'treadmill.stopRun': p => motorDevice(p) && Object.keys(p).length === 1,
+    'treadmill.resumeRun': p => motorDevice(p) && Object.keys(p).length === 1,
+    'treadmill.startRun': p => motorDevice(p) && runnerSettings(p) && Object.keys(p).length === 4,
+    'treadmill.speed': p => motorDevice(p) && Number.isInteger(p.targetSpeedUnits) &&
+        range(p.targetSpeedUnits, 1, 65535) && Object.keys(p).length === 2,
     'treadmill.disconnect': p => Object.keys(p).length === 0,
     'runner.create': runnerSettings,
     'runner.remove': p => Object.keys(p).length === 0,
@@ -35,12 +49,15 @@ export const commands = {
     'tracking.retry': p => Object.keys(p).length === 0
 };
 
-export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {}) {
+export function createService({ commandTimeout = 8000, staleTimeout = 5000, allowMotorStart = false, allowLanMotorControl = false } = {}) {
     let headset = null, state = null, updatedAt = 0;
     const dashboards = new Set(), pending = new Map();
     const send = (ws, message) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)); };
-    const snapshot = () => ({ type: 'status', headsetConnected: headset?.readyState === WebSocket.OPEN, state, updatedAt: updatedAt || null, pending: pending.size });
-    const broadcast = () => { for (const ws of dashboards) send(ws, snapshot()); };
+    const motorStartEnabled = ws => ws.localMotorDashboard === true && headset?.readyState === WebSocket.OPEN &&
+        ((allowMotorStart && headset.localMotorHeadset && server.address()?.address === '127.0.0.1') ||
+            (allowLanMotorControl && !headset.localMotorHeadset && state?.lanMotorControlEnabled === true));
+    const snapshot = ws => ({ type: 'status', ghostPresentationControlVersion: 1, motorStartEnabled: motorStartEnabled(ws), motorPauseStopEnabled: motorStartEnabled(ws), headsetConnected: headset?.readyState === WebSocket.OPEN, state, updatedAt: updatedAt || null, pending: pending.size });
+    const broadcast = () => { for (const ws of dashboards) send(ws, snapshot(ws)); };
     const finish = (id, success, error = '') => {
         const item = pending.get(id);
         if (!item) return;
@@ -68,10 +85,12 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {
 
             if (new URL(req.url, 'http://localhost').pathname !== '/ws') return socket.destroy();
             if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return socket.destroy();
-            wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws));
+            wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
         } catch { socket.destroy(); }
     });
-    wss.on('connection', ws => {
+    wss.on('connection', (ws, req) => {
+        ws.localMotorDashboard = req.socket.remoteAddress === '127.0.0.1' &&
+            hostIsLoopback(req.headers.host) && req.headers.origin === 'http://' + req.headers.host;
         let role = null, count = 0, windowStart = Date.now(), lastCameraFrame = 0;
         ws.alive = true;
         ws.on('error', () => {});
@@ -101,7 +120,10 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {
                     if (m.type !== 'hello' || m.protocol !== 1 || !['headset', 'dashboard'].includes(m.role)) throw new Error('Protocol 1 hello required');
                     if (m.role === 'headset' && headset?.readyState === WebSocket.OPEN) { ws.close(1008, 'A headset is already connected'); return; }
                     clearTimeout(helloTimer); role = m.role;
-                    if (role === 'headset') { headset = ws; state = null; updatedAt = 0; }
+                    if (role === 'headset') {
+                        ws.localMotorHeadset = req.socket.remoteAddress === '127.0.0.1';
+                        headset = ws; state = null; updatedAt = 0;
+                    }
                     else dashboards.add(ws);
                     send(ws, { type: 'welcome', protocol: 1 }); broadcast(); return;
                 }
@@ -118,9 +140,52 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {
                 if ((m.commandType.startsWith('run.') || m.commandType === 'runner.configure') && state.runnerControlVersion !== 1) return reject('Die App unterstützt die neue Laufsteuerung noch nicht. Bitte neu bauen und installieren.');
                 if (['runner.create', 'runner.remove'].includes(m.commandType) && (state.spawnControlVersion !== 1 || state.testScene !== true)) return reject('Spawnen ist nur in der verbundenen Unity-Testszene verfügbar.');
                 if (m.commandType.startsWith('treadmill.') && state.treadmillControlVersion !== 1) return reject('Für die Laufband-Verbindung die aktualisierte App neu bauen und installieren.');
+                if (m.commandType === 'runner.presentation' || m.commandType === 'runner.calibrate') {
+                    if (state.testScene || state.isSimulation || state.ghostPresentationVersion !== 1) {
+                        return reject('Die verbundene App unterstützt die Ghost-Darstellung nicht.');
+                    }
+                    if (state.runState !== 'Ready') return reject('Setze den Lauf vor dem Wechsel oder Kalibrieren zurück.');
+                    if (m.commandType === 'runner.calibrate' && (state.ghostPresentation?.mode !== 'TreadmillRelative' ||
+                        state.placedMarkers !== 1 || state.runnableMarkers !== 1)) {
+                        return reject('Für die Kalibrierung brauchst du den Laufbandmodus und genau einen getrackten Marker.');
+                    }
+                }
                 if (m.commandType === 'runner.mode' && state.ghostControlVersion !== 1) return reject('Für die Ghost-Steuerung die aktualisierte App neu bauen und installieren.');
                 if ((m.commandType === 'runner.comparison' || (m.commandType === 'runner.mode' && m.payload.runnerMode === 'AllTimePersonalBest')) && state.comparisonControlVersion !== 1) return reject('Für Runden und All-time PRs die aktualisierte App installieren.');
                 if (m.commandType.startsWith('camera.') && state.cameraControlVersion !== 1) return reject('Für die Live-Kamera die aktualisierte Brillen-App installieren.');
+                if (m.commandType === 'treadmill.readSpeedRange') {
+                    const belt = state.treadmill;
+                    if (!motorStartEnabled(ws) || !belt?.connected || !belt.canReadSpeedRange ||
+                        !belt.hasSpeed || belt.speedKmh !== 0 || belt.deviceId !== m.payload.deviceId) {
+                        return reject('Der Tempobereich kann nur am lokalen Dashboard bei stehendem Laufband geladen werden.');
+                    }
+                }
+                const startsBelt = m.commandType === 'treadmill.startRun';
+                const resumesBelt = m.commandType === 'treadmill.resumeRun';
+                const slowsBelt = m.commandType === 'treadmill.pauseRun' || m.commandType === 'treadmill.stopRun';
+                const setsBeltSpeed = m.commandType === 'treadmill.speed';
+                if (startsBelt || resumesBelt || slowsBelt || setsBeltSpeed) {
+                    const belt = state.treadmill;
+                    const requiredVersion = resumesBelt || slowsBelt ? 4 : 3;
+                    if (!motorStartEnabled(ws)) return reject('Laufbandsteuerung ist nur am lokalen Dashboard mit freigeschalteter USB- oder WLAN-Verbindung verfügbar.');
+                    if (state.isEditor || state.isSimulation || !(belt?.motorStartVersion >= requiredVersion) ||
+                        !belt.connected || !belt.hasFtmsControlPoint || belt.deviceId !== m.payload.deviceId) {
+                        return reject('Laufbandsteuerung benötigt die aktuelle Brillen-App und das gewählte FTMS-Laufband.');
+                    }
+                    if (!slowsBelt && !belt.hasSpeed) return reject('Kein aktueller Tempowert vom Laufband.');
+                    if (startsBelt || resumesBelt) {
+                        if (belt.speedKmh !== 0 || state.runState !== (resumesBelt ? 'Paused' : 'Ready') || !state.canRun) {
+                            return reject('Start oder Fortsetzen benötigt eine platzierte Strecke und ein stehendes Laufband.');
+                        }
+                    } else if (setsBeltSpeed) {
+                        const target = m.payload.targetSpeedUnits;
+                        if (!(belt.speedKmh > 0) || !(belt.speedStepUnits > 0) ||
+                            !range(target, belt.minSpeedUnits, belt.maxSpeedUnits) ||
+                            (target - belt.minSpeedUnits) % belt.speedStepUnits !== 0) {
+                            return reject('Das Laufband muss laufen und das Zieltempo im unterstützten Bereich liegen.');
+                        }
+                    }
+                }
                 if (pending.size) return reject('Ein Befehl wartet auf Bestätigung.');
                 const commandId = randomUUID();
                 const timer = setTimeout(() => finish(commandId, false, 'Keine Bestätigung. Zustand prüfen; Befehl wird nicht wiederholt.'), commandTimeout);
@@ -157,7 +222,12 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000 } = {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     const host = process.env.HOST || '0.0.0.0', port = Number(process.env.PORT || 8787);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT');
-    const service = createService();
+    const allowMotorStart = process.env.PACESCAPE_MOTOR_START === '1';
+    if (allowMotorStart && host !== '127.0.0.1') {
+        throw new Error('Motor start requires HOST=127.0.0.1.');
+    }
+    const allowLanMotorControl = process.env.PACESCAPE_WLAN_MOTOR_START === '1';
+    const service = createService({ allowMotorStart, allowLanMotorControl });
     service.server.on('error', error => { console.error(error.message); process.exitCode = 1; });
     service.server.listen(port, host, () => console.log(`PaceScape: http://localhost:${port}\nWebSocket: ws://localhost:${port}/ws\nUSB: adb reverse tcp:${port} tcp:${port}`));
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await service.close(); });

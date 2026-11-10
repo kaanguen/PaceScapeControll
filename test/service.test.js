@@ -1,16 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { networkInterfaces } from 'node:os';
 import WebSocket from 'ws';
 import { createService } from '../server.js';
 
 async function fixture(t, options = {}) {
     const service = createService(options);
-    await new Promise(done => service.server.listen(0, '127.0.0.1', done));
+    await new Promise(done => service.server.listen(0, options.allowLanMotorControl ? '0.0.0.0' : '127.0.0.1', done));
     t.after(() => service.close());
     const url = `http://127.0.0.1:${service.server.address().port}`;
-    async function client(role, token = '') {
-        const ws = new WebSocket(url.replace('http:', 'ws:') + '/ws');
+    async function client(role, token = '', origin, address = url) {
+        const ws = new WebSocket(address.replace('http:', 'ws:') + '/ws', { origin });
         const messages = [], waiters = [];
         ws.on('message', (raw, binary) => { const m = binary ? { type: 'camera-frame', data: raw } : JSON.parse(raw); messages.push(m); for (const wake of [...waiters]) wake(); });
         const next = (predicate = () => true) => new Promise((resolve, reject) => {
@@ -154,7 +155,7 @@ test('requires treadmill capability and relays explicit read-only BLE actions', 
 test('preserves zero-speed treadmill telemetry and raw distance through relay', async t => {
     const { dashboard: d, headset: h } = await connected(t);
     const treadmill = { supported: true, followTreadmill: true, hasSpeed: true, speedKmh: 0, hasDistance: true, totalDistanceMetres: 66000, devices: [{ id: 'abc', name: '<device>' }] };
-    h.send({ type: 'state', state: { treadmillControlVersion: 1, treadmill } });
+    h.send({ type: 'state', state: { treadmillControlVersion: 1, canRun: true, runState: 'Ready', treadmill } });
     const status = await d.next(m => m.type === 'status' && m.state?.treadmill);
     assert.deepEqual(status.state.treadmill, treadmill);
 });
@@ -262,4 +263,131 @@ test('camera frames are rejected when headset telemetry is stale', async t => {
     await new Promise(resolve => setTimeout(resolve, 40));
     h.ws.send(Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
     assert.match((await h.next(m => m.type === 'error')).error, /not enabled/);
+});
+
+test('motor start requires an opted-in local dashboard, a current headset build and a stopped belt', async t => {
+    const { client, url } = await fixture(t, { allowMotorStart: true });
+    const dashboard = await client('dashboard', '', url);
+    const withoutOrigin = await client('dashboard');
+    const headset = await client('headset');
+    const belt = { motorStartVersion: 3, minSpeedUnits: 100, maxSpeedUnits: 1600, speedStepUnits: 10, connected: true, hasFtmsControlPoint: true, hasSpeed: true, speedKmh: 0, deviceId: 'test-device' };
+    const report = (headset, treadmill) => headset.send({ type: 'state', state: { treadmillControlVersion: 1, canRun: true, runState: 'Ready', treadmill } });
+    const start = (dashboard, id) => dashboard.send(cmd(id, 'treadmill.startRun', { deviceId: belt.deviceId, paceMinutesPerKilometre: 6, spawnLane: 1, distanceBehindStartLine: 0.5 }));
+    report(headset, { ...belt, motorStartVersion: 1 });
+    await dashboard.next(m => m.type === 'status' && m.state);
+    start(dashboard, 'old-build');
+    assert.equal((await dashboard.next(m => m.requestId === 'old-build')).success, false);
+    report(headset, { ...belt, speedKmh: 2 });
+    await dashboard.next(m => m.type === 'status' && m.state?.treadmill.speedKmh === 2);
+    start(dashboard, 'moving');
+    assert.equal((await dashboard.next(m => m.requestId === 'moving')).success, false);
+    report(headset, belt);
+    await dashboard.next(m => m.type === 'status' && m.state?.treadmill.speedKmh === 0 && m.motorStartEnabled);
+    start(withoutOrigin, 'no-origin');
+    assert.equal((await withoutOrigin.next(m => m.requestId === 'no-origin')).success, false);
+    start(dashboard, 'start');
+    const forwarded = await headset.next(m => m.type === 'command');
+    assert.equal(forwarded.commandType, 'treadmill.startRun');
+    assert.equal(forwarded.token, undefined);
+    headset.send({ type: 'ack', commandId: forwarded.commandId, success: true });
+    assert.equal((await dashboard.next(m => m.requestId === 'start')).success, true);
+
+    const speed = (id, targetSpeedUnits) => dashboard.send(cmd(id, 'treadmill.speed', { deviceId: belt.deviceId, targetSpeedUnits }));
+    speed('stopped-speed', 220);
+    assert.equal((await dashboard.next(m => m.requestId === 'stopped-speed')).success, false);
+    report(headset, { ...belt, speedKmh: 3 });
+    await dashboard.next(m => m.type === 'status' && m.state?.treadmill.speedKmh === 3);
+    for (const [id, target] of [['above-max', 1610], ['off-step', 225]]) {
+        speed(id, target);
+        assert.equal((await dashboard.next(m => m.requestId === id)).success, false);
+    }
+    speed('set-speed', 220);
+    const speedCommand = await headset.next(m => m.type === 'command');
+    assert.equal(speedCommand.commandType, 'treadmill.speed');
+    assert.equal(speedCommand.payload.targetSpeedUnits, 220);
+    headset.send({ type: 'ack', commandId: speedCommand.commandId, success: true });
+    assert.equal((await dashboard.next(m => m.requestId === 'set-speed')).success, true);
+
+    const sessionCommand = (id, type) => dashboard.send(cmd(id, type, { deviceId: belt.deviceId }));
+    sessionCommand('old-pause', 'treadmill.pauseRun');
+    assert.equal((await dashboard.next(m => m.requestId === 'old-pause')).success, false);
+    headset.send({ type: 'state', state: { treadmillControlVersion: 1, canRun: true, runState: 'Paused',
+        treadmill: { ...belt, motorStartVersion: 4, hasSpeed: false } } });
+    await dashboard.next(m => m.type === 'status' && m.motorPauseStopEnabled && m.state?.treadmill.motorStartVersion === 4);
+    sessionCommand('stale-resume', 'treadmill.resumeRun');
+    assert.equal((await dashboard.next(m => m.requestId === 'stale-resume')).success, false);
+    for (const type of ['treadmill.pauseRun', 'treadmill.stopRun']) {
+        sessionCommand(type, type);
+        const forwarded = await headset.next(m => m.type === 'command');
+        assert.equal(forwarded.commandType, type);
+        headset.send({ type: 'ack', commandId: forwarded.commandId, success: true });
+        assert.equal((await dashboard.next(m => m.requestId === type)).success, true);
+    }
+    headset.send({ type: 'state', state: { treadmillControlVersion: 1, canRun: true, runState: 'Paused',
+        treadmill: { ...belt, motorStartVersion: 4 } } });
+    await dashboard.next(m => m.type === 'status' && m.state?.treadmill.motorStartVersion === 4 && m.state.treadmill.hasSpeed);
+    sessionCommand('resume', 'treadmill.resumeRun');
+    const resume = await headset.next(m => m.type === 'command');
+    assert.equal(resume.commandType, 'treadmill.resumeRun');
+    headset.send({ type: 'ack', commandId: resume.commandId, success: true });
+    assert.equal((await dashboard.next(m => m.requestId === 'resume')).success, true);
+});
+
+test('routes ghost presentation and calibration only to a supported tracking session', async t => {
+    const { dashboard, headset } = await connected(t);
+    const presentation = { presentationMode: 'TreadmillRelative', sideOffsetMetres: 1.5, visibilityDistanceMetres: 10 };
+    dashboard.send(cmd('unsupported-presentation', 'runner.presentation', presentation));
+    assert.equal((await dashboard.next(m => m.requestId === 'unsupported-presentation')).success, false);
+    const state = { ghostPresentationVersion: 1, runState: 'Ready', placedMarkers: 1, runnableMarkers: 1,
+        ghostPresentation: { mode: 'Track' } };
+    headset.send({ type: 'state', state });
+    const status = await dashboard.next(m => m.type === 'status' && m.state?.ghostPresentationVersion === 1);
+    assert.equal(status.ghostPresentationControlVersion, 1);
+    dashboard.send(cmd('wrong-mode', 'runner.calibrate', {}));
+    assert.equal((await dashboard.next(m => m.requestId === 'wrong-mode')).success, false);
+    dashboard.send(cmd('bad-offset', 'runner.presentation', { ...presentation, sideOffsetMetres: 0 }));
+    assert.equal((await dashboard.next(m => m.requestId === 'bad-offset')).success, false);
+    dashboard.send(cmd('presentation', 'runner.presentation', presentation));
+    const select = await headset.next(m => m.type === 'command');
+    assert.equal(select.commandType, 'runner.presentation');
+    assert.deepEqual(select.payload, presentation);
+    headset.send({ type: 'ack', commandId: select.commandId, success: true });
+    assert.equal((await dashboard.next(m => m.requestId === 'presentation')).success, true);
+    headset.send({ type: 'state', state: { ...state, ghostPresentation: { mode: 'TreadmillRelative' } } });
+    await dashboard.next(m => m.type === 'status' && m.state?.ghostPresentation?.mode === 'TreadmillRelative');
+    dashboard.send(cmd('calibrate', 'runner.calibrate', {}));
+    const calibrate = await headset.next(m => m.type === 'command');
+    assert.equal(calibrate.commandType, 'runner.calibrate');
+    headset.send({ type: 'ack', commandId: calibrate.commandId, success: true });
+    assert.equal((await dashboard.next(m => m.requestId === 'calibrate')).success, true);
+});
+
+
+test('WLAN motor start requires headset opt-in and a dashboard on the server Mac', async t => {
+    const adapter = Object.values(networkInterfaces()).flat().find(entry => entry?.family === 'IPv4' && !entry.internal);
+    if (!adapter) return t.skip('No LAN interface available');
+    const { client, url } = await fixture(t, { allowLanMotorControl: true });
+    const lanUrl = url.replace('127.0.0.1', adapter.address);
+    const local = await client('dashboard', '', url);
+    const remote = await client('dashboard', '', lanUrl, lanUrl);
+    const headset = await client('headset', '', undefined, lanUrl);
+    const state = { treadmillControlVersion: 1, canRun: true, runState: 'Ready',
+        treadmill: { motorStartVersion: 4, connected: true, hasFtmsControlPoint: true, hasSpeed: true, speedKmh: 0, deviceId: 'belt' } };
+    const start = (dashboard, id) => dashboard.send(cmd(id, 'treadmill.startRun', {
+        deviceId: 'belt', paceMinutesPerKilometre: 6, spawnLane: 1, distanceBehindStartLine: 0.5
+    }));
+    headset.send({ type: 'state', state });
+    await local.next(m => m.type === 'status' && m.state);
+    start(local, 'not-enabled');
+    assert.equal((await local.next(m => m.requestId === 'not-enabled')).success, false);
+    headset.send({ type: 'state', state: { ...state, lanMotorControlEnabled: true } });
+    await local.next(m => m.type === 'status' && m.motorStartEnabled);
+    await remote.next(m => m.type === 'status' && m.state?.lanMotorControlEnabled);
+    start(remote, 'remote');
+    assert.equal((await remote.next(m => m.requestId === 'remote')).success, false);
+    start(local, 'local');
+    const forwarded = await headset.next(m => m.type === 'command');
+    assert.equal(forwarded.commandType, 'treadmill.startRun');
+    headset.send({ type: 'ack', commandId: forwarded.commandId, success: true });
+    assert.equal((await local.next(m => m.requestId === 'local')).success, true);
 });
