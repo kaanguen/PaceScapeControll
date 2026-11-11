@@ -67,6 +67,14 @@ Die Pace bleibt im Lauf veränderbar. Spur- und Startabstandsänderungen erforde
 
 **Tracking stoppen / Neu platzieren** löscht dagegen die lokalen Platzierungen und setzt den Lauf zurück. Ein geschlossenes Browser-Tab pausiert den Lauf nicht, solange App und Server verbunden bleiben.
 
+## Warm-up vor dem Lauf
+
+Wähle **Warm-up** in der Hauptnavigation. Stelle die Folge aus Hampelmännern
+und Kniebeugen zusammen und gib die Dauer pro Übung ein. Die aktuelle App braucht dafür
+ein getracktes Headset und eine wartende Session. Der kleine Coach erscheint unten rechts im Sichtfeld der Brille. Während der Wiedergabe zeigt das
+Dashboard die aktuelle Übung und ihre Restzeit. Du kannst Übungen überspringen
+oder das Warm-up beenden. Zum Ausprobieren ohne Brille dient `npm run simulate`.
+
 ## Schnellstart
 
 Voraussetzung: **Node.js 22 oder neuer**. Im Repository-Ordner:

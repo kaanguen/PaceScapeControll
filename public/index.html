@@ -28,7 +28,7 @@
   <text x="145" y="104" fill="#f2f2f5" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" font-weight="500" font-size="94" letter-spacing="-3.6">PaceScape</text>
 </svg></a>
     <p class="nav-caption">WORKSPACE</p>
-    <nav aria-label="Hauptbereiche"><a class="nav-link" href="#overview" aria-label="Dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span>Dashboard</span></a><a class="nav-link" href="#configuration" aria-label="Konfiguration"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg><span>Konfiguration</span></a><a class="nav-link" href="#analysis" aria-label="Analyse"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5m0 14h16M8 15l4-6 4 3 4-8"/></svg><span>Analyse</span></a><a class="nav-link" href="#help" aria-label="Hilfe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 5m0 2v1"/></svg><span>Hilfe</span></a></nav>
+    <nav aria-label="Hauptbereiche"><a class="nav-link" href="#overview" aria-label="Dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span>Dashboard</span></a><a class="nav-link" href="#warmup" aria-label="Warm-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 5 13h6l-1 9 9-12h-6l1-8z"/></svg><span>Warm-up</span></a><a class="nav-link" href="#configuration" aria-label="Konfiguration"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg><span>Konfiguration</span></a><a class="nav-link" href="#analysis" aria-label="Analyse"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5m0 14h16M8 15l4-6 4 3 4-8"/></svg><span>Analyse</span></a><a class="nav-link" href="#help" aria-label="Hilfe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 5m0 2v1"/></svg><span>Hilfe</span></a></nav>
     <div class="sidebar-bottom"><span class="local-dot"></span><div>Lokaler Workspace<small>Magic Leap 2 · PaceScape</small></div><span class="version">01</span></div>
 </aside>
 <div class="workspace">
@@ -77,6 +77,30 @@
     <p class="mini-track-disclaimer">Schematisch · keine räumliche Ortung</p>
 </section><section class="panel dashboard-speed" aria-labelledby="dashboardSpeedTitle"><div class="panel-top"><h2 id="dashboardSpeedTitle">Ghost-Tempo</h2><a class="speed-settings-link" href="#configuration" aria-label="Ghost-Modus konfigurieren">Einstellungen ↗</a></div><form id="livePaceForm" class="live-speed"><fieldset disabled><legend>Voreingestelltes Ghost-Tempo</legend><div class="speed-slider-heading"><label for="paceInput" id="sliderUnitLabel">Geschwindigkeit</label><label class="sr-only" for="paceUnit">Slider-Einheit</label><select id="paceUnit" aria-label="Slider-Einheit"><option value="kmh">km/h</option><option value="pace">Pace · min/km</option></select><output id="sliderSpeed">10,0 km/h · 6:00 min/km</output></div><input id="paceInput" type="range" min="1" max="30" step="0.1" value="10" aria-describedby="paceSync"><div class="slider-scale"><span id="sliderMinimum">1 km/h</span><span id="sliderMaximum">30 km/h</span></div><p class="help" id="paceSync" role="status">Änderungen werden automatisch übertragen.</p><p class="help">Bestätigt: <output id="paceConfirmed">—</output></p></fieldset></form><p id="dashboardSpeedHint" class="help">Voreingestelltes Tempo für deinen Ghost.</p></section></aside></div>
         </div>
+        <section id="warmup" class="app-view" aria-labelledby="pageTitle" hidden>
+            <div class="panel warmup-content">
+                <p id="warmupStatus" class="help" role="status">Verbinde eine App mit Warm-up-Unterstützung.</p>
+                <form id="warmupForm">
+                    <fieldset id="warmupPlan" disabled>
+                        <legend class="sr-only">Übungsfolge zusammenstellen</legend>
+                        <ol id="warmupSteps"></ol>
+                        <div class="warmup-actions">
+                            <button id="addWarmupStep" type="button" class="secondary">Übung hinzufügen</button>
+                            <button id="startWarmup" type="submit" disabled>Warm-up starten</button>
+                        </div>
+                    </fieldset>
+                </form>
+                <fieldset id="warmupPlayback" hidden disabled>
+                    <legend class="sr-only">Aktives Warm-up</legend>
+                    <label for="warmupProgress" id="warmupCurrent"></label>
+                    <progress id="warmupProgress" max="1" value="0"></progress>
+                    <div class="warmup-actions">
+                        <button id="nextWarmup" type="button" class="secondary">Überspringen</button>
+                        <button id="stopWarmup" type="button">Warm-up beenden</button>
+                    </div>
+                </fieldset>
+            </div>
+        </section>
         <div id="configuration" class="app-view" hidden><div class="configuration-layout"><div class="configuration-fields"><div class="control-grid">
             <section class="panel control-card runner-config"><div class="card-heading"><span class="card-index">01</span><h3>Ghost einstellen</h3></div><form id="runnerModeForm" class="live-speed"><fieldset disabled><legend>Ghost-Modus</legend><label for="runnerMode">Ghost-Tempo</label><select id="runnerMode"><option value="FixedPace">Ghost · voreingestelltes Tempo</option><option id="allTimeModeOption" value="AllTimePersonalBest" disabled>Ghost · All-time PRs</option></select><button class="secondary" type="submit">Modus übernehmen</button><p id="runnerModeHelp" class="help" role="status">Aktualisierte App verbinden. Ein Moduswechsel pausiert den Lauf und erhält die Position.</p></fieldset></form><form id="ghostPresentationForm" class="live-speed">
                 <fieldset disabled>

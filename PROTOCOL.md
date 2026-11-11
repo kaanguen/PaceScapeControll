@@ -113,3 +113,22 @@ Updated headsets include `performance.sessionRecordVersion: 1`, `sessionPrevious
 ## Ghost presentation
 
 Dashboard status advertises `ghostPresentationControlVersion: 1`. Tracking clients with `ghostPresentationVersion: 1` report `ghostPresentation` with mode, side offset, visibility distance and calibration state. While Ready, `runner.presentation` accepts `presentationMode` (`Track` or `TreadmillRelative`), `sideOffsetMetres` (±0.5–5 m), and `visibilityDistanceMetres` (1–100 m). `runner.calibrate` accepts `{}` in relative mode with exactly one tracked placement. The headset validates the head pose and acknowledges both commands.
+
+## Warm-up control version 1
+
+The tracking client advertises `warmupControlVersion: 1` and a `warmup` state with
+`active`, `canStart`, `status`, zero-based `stepIndex`, `stepCount`,
+`animationId`, `stepElapsed` and `stepDuration`. The two times are seconds.
+When inactive, the step index is −1.
+
+- `exercise.startWarmup` requires Ready and `warmup.canStart: true`. The
+  payload is `{ "steps": [{ "animationId": "Mixamo_AirSquat", "seconds": 8 }] }`.
+  Supply 1–20 steps, each with 1–300 seconds and either
+  `Mixamo_StartJumpingJacks` or `Mixamo_AirSquat`.
+- `exercise.nextWarmup` skips the current step. `exercise.stopWarmup` ends
+  playback. Both require an active warm-up and an empty payload.
+
+The relay uses the regular acknowledgement flow. Progress comes from the client.
+An active warm-up blocks both ghost and treadmill run starts or resumes.
+An interruption reports `TrackingLost`, `ConnectionLost`, or `ViewUnavailable` when the avatar cannot be displayed.
+Warm-up needs no treadmill control and is also available in the labelled simulator.

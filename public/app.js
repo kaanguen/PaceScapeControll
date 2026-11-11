@@ -4,7 +4,11 @@ let queuedPace = null, paceTimer, selectedPace = 6;
 let cameraFrameUrl = null, cameraFrameAt = 0;
 const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
 $('siteUrl').textContent = location.origin; $('wsUrl').textContent = wsUrl;
-const names = { 'camera.start': 'Kamera starten', 'camera.stop': 'Kamera stoppen', 'runner.comparison': 'Vergleichsdistanz ändern', 'runner.mode': 'Läufermodus ändern', 'runner.presentation': 'Ghost-Darstellung ändern', 'runner.calibrate': 'Laufbandplatz kalibrieren', 'treadmill.pauseRun': 'Lauf und Laufband pausieren', 'treadmill.stopRun': 'Lauf beenden und Laufband stoppen', 'treadmill.resumeRun': 'Lauf und Laufband fortsetzen', 'treadmill.startRun': 'Lauf und Laufband starten', 'treadmill.speed': 'Laufbandtempo übernehmen', 'treadmill.readSpeedRange': 'Tempobereich abfragen', 'treadmill.scan': 'Bluetooth suchen', 'treadmill.scan.stop': 'Suche stoppen', 'treadmill.connect': 'Laufband verbinden', 'treadmill.disconnect': 'Laufband trennen', 'runner.create': 'Läufer spawnen', 'runner.remove': 'Läufer entfernen', 'runner.configure': 'Läufer einstellen', 'run.start': 'Lauf starten', 'run.pause': 'Lauf pausieren', 'run.resume': 'Weiterlaufen', 'run.reset': 'Lauf zurücksetzen', 'runner.pace': 'Pace ändern', 'runner.spawn': 'Startposition ändern', 'tracking.start': 'Tracking starten', 'tracking.stop': 'Tracking stoppen', 'tracking.retry': 'Tracking neu starten', 'tracking.configure': 'Erkennung konfigurieren', 'placement.configure': 'Platzierung konfigurieren' };
+const names = { 'exercise.startWarmup': 'Warm-up starten', 'exercise.nextWarmup': 'Übung überspringen', 'exercise.stopWarmup': 'Warm-up beenden', 'camera.start': 'Kamera starten', 'camera.stop': 'Kamera stoppen', 'runner.comparison': 'Vergleichsdistanz ändern', 'runner.mode': 'Läufermodus ändern', 'runner.presentation': 'Ghost-Darstellung ändern', 'runner.calibrate': 'Laufbandplatz kalibrieren', 'treadmill.pauseRun': 'Lauf und Laufband pausieren', 'treadmill.stopRun': 'Lauf beenden und Laufband stoppen', 'treadmill.resumeRun': 'Lauf und Laufband fortsetzen', 'treadmill.startRun': 'Lauf und Laufband starten', 'treadmill.speed': 'Laufbandtempo übernehmen', 'treadmill.readSpeedRange': 'Tempobereich abfragen', 'treadmill.scan': 'Bluetooth suchen', 'treadmill.scan.stop': 'Suche stoppen', 'treadmill.connect': 'Laufband verbinden', 'treadmill.disconnect': 'Laufband trennen', 'runner.create': 'Läufer spawnen', 'runner.remove': 'Läufer entfernen', 'runner.configure': 'Läufer einstellen', 'run.start': 'Lauf starten', 'run.pause': 'Lauf pausieren', 'run.resume': 'Weiterlaufen', 'run.reset': 'Lauf zurücksetzen', 'runner.pace': 'Pace ändern', 'runner.spawn': 'Startposition ändern', 'tracking.start': 'Tracking starten', 'tracking.stop': 'Tracking stoppen', 'tracking.retry': 'Tracking neu starten', 'tracking.configure': 'Erkennung konfigurieren', 'placement.configure': 'Platzierung konfigurieren' };
+const warmupExercises = new Map([
+    ['Mixamo_StartJumpingJacks', 'Hampelmänner'],
+    ['Mixamo_AirSquat', 'Kniebeugen']
+]);
 const phases = { Stopped: 'Gestoppt', Ready: 'Bereit', Failed: 'Fehler', UnsupportedPlatform: 'Editor / nicht unterstützt', WaitingForScene: 'Szene laden', CheckingConfiguration: 'Konfiguration prüfen', RequestingPermissions: 'Berechtigungen anfragen', WaitingForOpenXR: 'Warten auf OpenXR', CheckingFeatures: 'XR-Funktionen prüfen', StartingSubsystems: 'Subsysteme starten', StartingMarkerDetector: 'Markererkennung starten', Suspended: 'Unterbrochen', Recovering: 'Wiederherstellung' };
 function log(message) {
     const li = document.createElement('li'), time = document.createElement('time');
@@ -23,7 +27,7 @@ function controls() {
     $('userSpeedValue').textContent = belt?.connected && belt.hasSpeed && Number.isFinite(belt.speedKmh)
         ? belt.speedKmh.toLocaleString('de-DE', { maximumFractionDigits: 2 })
         : '—';
-    document.querySelectorAll('fieldset').forEach(field => { field.disabled = !fresh() || Boolean(pending) || Boolean(snapshot?.pending); });
+    document.querySelectorAll('fieldset:not(#warmupPlan, #warmupPlayback)').forEach(field => { field.disabled = !fresh() || Boolean(pending) || Boolean(snapshot?.pending); });
     if (fresh() && !pending && !snapshot.pending) {
         $('startTracking').disabled = snapshot.state.testScene || snapshot.state.trackingEnabled;
         $('stopTracking').disabled = !snapshot.state.trackingEnabled;
@@ -37,9 +41,9 @@ function controls() {
         for (const id of ['trackingForm', 'placementForm']) $(id).querySelector('fieldset').disabled = state.testScene === true;
         $('runnerForm').querySelector('fieldset').disabled = !supported;
         $('runControls').disabled = !supported;
-        $('lane').disabled = state.runState !== 'Ready';
-        $('distance').disabled = state.runState !== 'Ready';
-        $('startRun').disabled = state.runState !== 'Ready' || !state.canRun;
+        $('lane').disabled = state.runState !== 'Ready' || state.warmup?.active === true;
+        $('distance').disabled = $('lane').disabled;
+        $('startRun').disabled = state.runState !== 'Ready' || !state.canRun || state.warmup?.active === true;
         $('pauseRun').disabled = state.runState !== 'Running' && !(state.runState === 'Paused' && state.canRun);
         $('resetRun').disabled = state.runState !== 'Running' && state.runState !== 'Paused';
     }
@@ -66,6 +70,7 @@ function controls() {
     if (snapshot?.headsetConnected && !fresh()) notice('App-Status veraltet. Warte auf ein neues Update.', true);
     renderMiniTrack();
     renderCameraControls();
+    renderWarmup();
 }
 function updateGhostPresentation() {
     const state = snapshot?.state;
@@ -125,7 +130,9 @@ function render(message) {
     $('pendingCountLabel').textContent = s?.testScene ? 'Markertracking' : 'Warten auf Boden';
     const supported = s?.runnerControlVersion === 1 && s?.ghostControlVersion === 1;
     const runNames = { Ready: 'Bereit', Running: 'Läuft', Paused: 'Pausiert' };
-    $('runState').textContent = supported ? runNames[s.runState] || 'Unbekannt' : s ? 'App aktualisieren' : 'Keine App verbunden';
+    const warmupActive = s?.warmup?.active === true;
+    $('runState').textContent = warmupActive ? 'Warm-up läuft'
+        : supported ? runNames[s.runState] || 'Unbekannt' : s ? 'App aktualisieren' : 'Keine App verbunden';
     $('runState').classList.toggle('online', supported && s.runState === 'Running');
     const motorMode = message.motorStartEnabled === true && !s?.testScene;
     $('pauseRun').textContent = s?.runState === 'Paused'
@@ -134,6 +141,7 @@ function render(message) {
     $('resetRun').textContent = motorMode ? 'Lauf beenden' : 'Ghost zurücksetzen';
     $('runHelp').textContent = !s ? 'App verbinden, Läufer einstellen und Marker platzieren. Der Läufer wartet auf deinen Start.'
         : !supported ? 'Für die Laufsteuerung die aktualisierte App neu bauen und auf der Brille installieren.'
+        : warmupActive ? 'Der Lauf kann nach dem Warm-up gestartet werden.'
         : s.runState === 'Running' ? 'Der Lauf läuft. Pace kannst du live ändern. Pause hält die Position; Zurücksetzen beendet den Lauf.'
         : s.runState === 'Paused' ? (s.canRun ? 'Der Lauf ist pausiert. Weiterlaufen nutzt die bestätigten Einstellungen; Pace vorher mit Läufer einstellen übernehmen.' : 'Der Lauf ist pausiert. Auf wiederhergestellte Verbindung und vollständiges Tracking warten, dann bewusst weiterlaufen.')
         : s.testScene ? (s.runnerSpawned ? 'Läufer gespawnt. Lauf starten übernimmt die Einstellungen und startet die Bewegung.' : 'Unity-Testszene bereit. Läufer einstellen und über Läufer spawnen erzeugen; danach Lauf starten.')
@@ -213,6 +221,110 @@ function runnerSettings() {
     if (!Number.isInteger(spawnLane) || spawnLane < 1 || spawnLane > 8 || !Number.isFinite(distanceBehindStartLine) || distanceBehindStartLine < 0 || distanceBehindStartLine > 1000) throw new Error('Spur oder Startabstand ungültig.');
     return { paceMinutesPerKilometre, spawnLane, distanceBehindStartLine };
 }
+function updateWarmupDraft() {
+    const list = $('warmupSteps');
+    $('addWarmupStep').disabled = list.children.length >= 20;
+    Array.from(list.children).forEach((row, index) => {
+        const remove = row.querySelector('button');
+        remove.disabled = list.children.length <= 1;
+        remove.setAttribute('aria-label', `Übung ${index + 1} entfernen`);
+    });
+}
+
+function addWarmupStep(focus = false) {
+    const list = $('warmupSteps');
+    if (list.children.length >= 20) return;
+    const row = document.createElement('li');
+    const fields = document.createElement('div');
+    fields.className = 'warmup-step';
+    const exerciseLabel = document.createElement('label');
+    exerciseLabel.textContent = 'Übung';
+    const exercise = document.createElement('select');
+    for (const [id, name] of warmupExercises) {
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = name;
+        exercise.append(option);
+    }
+    exerciseLabel.append(exercise);
+    const secondsLabel = document.createElement('label');
+    secondsLabel.textContent = 'Dauer (s)';
+    const seconds = document.createElement('input');
+    seconds.type = 'number';
+    seconds.min = '1';
+    seconds.max = '300';
+    seconds.step = 'any';
+    seconds.required = true;
+    secondsLabel.append(seconds);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'secondary';
+    remove.textContent = 'Entfernen';
+    remove.onclick = () => {
+        row.remove();
+        updateWarmupDraft();
+        $('addWarmupStep').focus();
+    };
+    fields.append(exerciseLabel, secondsLabel, remove);
+    row.append(fields);
+    list.append(row);
+    updateWarmupDraft();
+    if (focus) exercise.focus();
+}
+
+function renderWarmup() {
+    const state = snapshot?.state;
+    const connected = Boolean(fresh());
+    const supported = connected && state.warmupControlVersion === 1 && !state.testScene;
+    const warmup = supported ? state.warmup : null;
+    const active = warmup?.active === true;
+    const waiting = Boolean(pending || snapshot?.pending);
+    const playback = $('warmupPlayback');
+    const form = $('warmupForm');
+    const moveFocus = (active ? form : playback).contains(document.activeElement);
+    form.hidden = active;
+    $('warmupPlan').disabled = active || waiting;
+    $('startWarmup').disabled = !supported || state.runState !== 'Ready' || warmup?.canStart !== true;
+    playback.hidden = !active;
+    playback.disabled = !active || waiting;
+    if (moveFocus) document.querySelector('.nav-link[href="#warmup"]').focus({ preventScroll: true });
+
+    if (active) {
+        const duration = Number.isFinite(warmup.stepDuration) && warmup.stepDuration > 0 ? warmup.stepDuration : 1;
+        const elapsed = Number.isFinite(warmup.stepElapsed) ? Math.max(0, Math.min(duration, warmup.stepElapsed)) : 0;
+        const name = warmupExercises.get(warmup.animationId) || 'Übung';
+        $('warmupProgress').max = duration;
+        $('warmupProgress').value = elapsed;
+        $('warmupCurrent').textContent = `${warmup.stepIndex + 1} von ${warmup.stepCount} · ${name} · ${Math.ceil(duration - elapsed)} s übrig`;
+    }
+    const outcomes = {
+        Completed: 'Warm-up abgeschlossen.',
+        Stopped: 'Warm-up beendet.',
+        TrackingLost: 'Warm-up beendet, weil das Tracking verloren ging.',
+        ViewUnavailable: 'Warm-up beendet, weil der Avatar gerade nicht angezeigt werden kann.',
+        ConnectionLost: 'Warm-up beendet, weil die Verbindung unterbrochen wurde.'
+    };
+    const outcome = outcomes[warmup?.status];
+    const readiness = state?.runState !== 'Ready'
+        ? 'Setze den Lauf für ein Warm-up zuerst zurück.'
+        : warmup?.canStart !== true ? 'Warte auf die Startfreigabe der App und prüfe das Tracking der Brille.' : '';
+    $('warmupStatus').textContent = !connected ? 'Warte auf eine aktuelle App-Verbindung.'
+        : !supported ? 'Die verbundene App unterstützt Warm-up nicht.'
+        : active ? 'Warm-up läuft.'
+        : [outcome, readiness].filter(Boolean).join(' ') || 'Bereit. Wähle Übungen und gib die Dauer pro Übung ein.';
+}
+
+addWarmupStep();
+$('addWarmupStep').onclick = () => addWarmupStep(true);
+bind('warmupForm', 'exercise.startWarmup', () => ({
+    steps: Array.from($('warmupSteps').children, row => ({
+        animationId: row.querySelector('select').value,
+        seconds: row.querySelector('input').valueAsNumber
+    }))
+}));
+$('nextWarmup').onclick = () => command('exercise.nextWarmup', {});
+$('stopWarmup').onclick = () => command('exercise.stopWarmup', {});
+
 bind('comparisonForm', 'runner.comparison', () => ({ comparisonDistanceMetres: $('comparisonPreset').value === '400' ? 400 : Math.round(Number($('comparisonKm').value) * 1000), useDemoRecords: $('useDemoRecords').checked }));
 $('comparisonPreset').addEventListener('change', () => { $('customDistanceLabel').hidden = $('comparisonPreset').value !== 'custom'; });
 bind('runnerModeForm', 'runner.mode', () => ({ runnerMode: $('runnerMode').value }));
@@ -403,7 +515,7 @@ function renderTreadmill(state) {
         if (devices.some(device => device.id === selection)) select.value = selection;
         select.dataset.devices = signature;
     }
-    if (state?.ghostControlVersion === 1) {
+    if (state?.ghostControlVersion === 1 && state.warmup?.active !== true) {
         $('runHelp').textContent = !state.canRun ? 'Ghost gewählt. Vollständiges Tracking abwarten; dann bewusst starten oder weiterlaufen.'
             : state.runState === 'Running' ? 'Der Ghost läuft selbstständig auf seiner Spur. Deine Messung stammt ausschließlich vom Laufband; voreingestelltes Tempo oder All-time PR bestimmt den Ghost.'
             : 'Ghost bereit. Voreingestelltes Tempo oder All-time PR wählen und bewusst starten oder weiterlaufen.';
@@ -475,13 +587,14 @@ document.querySelectorAll('[data-select-lane]').forEach(chip => {
 // Views keep the existing controls mounted so connection and form state survive navigation.
 const viewCopy = {
     overview: ['Übersicht', 'Deine Session auf einen Blick.', 'Dashboard'],
+    warmup: ['Warm-up', 'Stelle deine Übungen vor dem Lauf zusammen.', 'Warm-up'],
     configuration: ['Konfiguration', 'Ghost, Strecke und Geräteeinstellungen.', 'Konfiguration'],
     analysis: ['Analyse', 'Runden, Bewegung und persönliche Bestleistungen.', 'Analyse'],
     help: ['Support & Verbindung', 'Einrichtung und Aktivitätsprotokoll.', 'Hilfe']
 };
 function showView() {
     const hash = location.hash.slice(1) || 'overview';
-    const aliases = { controls: 'configuration', settings: 'configuration', connectionSettings: 'configuration', activity: 'help' };
+    const aliases = { controls: 'configuration', settings: 'configuration', connectionSettings: 'configuration', activity: 'help', warmupPanel: 'warmup' };
     const view = viewCopy[hash] ? hash : aliases[hash] || 'overview';
     document.querySelectorAll('.app-view').forEach(panel => { panel.hidden = panel.id !== view; });
     document.querySelectorAll('.nav-link').forEach(link => {

@@ -12,7 +12,13 @@ const range = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v 
 const maxCameraFrameBytes = 2 * 1024 * 1024;
 const runnerSettings = p => range(p.paceMinutesPerKilometre, 0.1, 60) && Number.isInteger(p.spawnLane) && range(p.spawnLane, 1, 8) && range(p.distanceBehindStartLine, 0, 1000);
 const motorDevice = p => typeof p.deviceId === 'string' && p.deviceId.length > 0 && p.deviceId.length <= 256;
+const warmupExercises = new Set(['Mixamo_StartJumpingJacks', 'Mixamo_AirSquat']);
 export const commands = {
+    'exercise.startWarmup': p => Object.keys(p).length === 1 && Array.isArray(p.steps) &&
+        range(p.steps.length, 1, 20) && p.steps.every(step => object(step) && Object.keys(step).length === 2 &&
+            warmupExercises.has(step.animationId) && range(step.seconds, 1, 300)),
+    'exercise.nextWarmup': p => Object.keys(p).length === 0,
+    'exercise.stopWarmup': p => Object.keys(p).length === 0,
     'camera.start': p => Object.keys(p).length === 0,
     'camera.stop': p => Object.keys(p).length === 0,
     'runner.comparison': p => Number.isInteger(p.comparisonDistanceMetres) && range(p.comparisonDistanceMetres, 1, 1000000) && typeof p.useDemoRecords === 'boolean' && Object.keys(p).length === 2,
@@ -128,6 +134,7 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000, allo
                     send(ws, { type: 'welcome', protocol: 1 }); broadcast(); return;
                 }
                 if (role === 'headset') {
+                    if (ws !== headset) return;
                     if (m.type === 'state' && object(m.state)) { state = m.state; updatedAt = Date.now(); broadcast(); return; }
                     if (m.type === 'ack' && typeof m.commandId === 'string' && typeof m.success === 'boolean') { finish(m.commandId, m.success, String(m.error || '').slice(0, 1000)); return; }
                     throw new Error('Unsupported headset message');
@@ -139,6 +146,22 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000, allo
                 if (!updatedAt || Date.now() - updatedAt > staleTimeout) return reject('App-Status veraltet.');
                 if ((m.commandType.startsWith('run.') || m.commandType === 'runner.configure') && state.runnerControlVersion !== 1) return reject('Die App unterstützt die neue Laufsteuerung noch nicht. Bitte neu bauen und installieren.');
                 if (['runner.create', 'runner.remove'].includes(m.commandType) && (state.spawnControlVersion !== 1 || state.testScene !== true)) return reject('Spawnen ist nur in der verbundenen Unity-Testszene verfügbar.');
+                if (m.commandType.startsWith('exercise.')) {
+                    if (state.warmupControlVersion !== 1 || state.testScene) {
+                        return reject('Die verbundene App unterstützt Warm-up nicht.');
+                    }
+                    if (m.commandType === 'exercise.startWarmup') {
+                        if (state.runState !== 'Ready' || state.warmup?.canStart !== true || state.warmup.active) {
+                            return reject('Die App hat das Warm-up noch nicht freigegeben. Prüfe Laufzustand und Tracking.');
+                        }
+                    } else if (state.warmup?.active !== true) {
+                        return reject('Es läuft kein Warm-up.');
+                    }
+                }
+                if (state.warmup?.active === true &&
+                    ['run.start', 'run.resume', 'treadmill.startRun', 'treadmill.resumeRun'].includes(m.commandType)) {
+                    return reject('Beende zuerst das Warm-up.');
+                }
                 if (m.commandType.startsWith('treadmill.') && state.treadmillControlVersion !== 1) return reject('Für die Laufband-Verbindung die aktualisierte App neu bauen und installieren.');
                 if (m.commandType === 'runner.presentation' || m.commandType === 'runner.calibrate') {
                     if (state.testScene || state.isSimulation || state.ghostPresentationVersion !== 1) {

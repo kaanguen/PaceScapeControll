@@ -391,3 +391,50 @@ test('WLAN motor start requires headset opt-in and a dashboard on the server Mac
     headset.send({ type: 'ack', commandId: forwarded.commandId, success: true });
     assert.equal((await local.next(m => m.requestId === 'local')).success, true);
 });
+
+test('validates warm-up steps and relays controls only in the matching app state', async t => {
+    const { dashboard, headset } = await connected(t);
+    const start = 'exercise.startWarmup';
+    const payload = { steps: [
+        { animationId: 'Mixamo_StartJumpingJacks', seconds: 4.5 },
+        { animationId: 'Mixamo_AirSquat', seconds: 7 }
+    ] };
+    const publish = async (warmup, extras = {}) => {
+        headset.send({ type: 'state', state: { warmupControlVersion: 1, runnerControlVersion: 1, runState: 'Ready', warmup, ...extras } });
+        await dashboard.next(m => m.type === 'status' && m.state?.warmup?.status === warmup.status);
+    };
+    const rejects = async (id, type, data) => {
+        dashboard.send(cmd(id, type, data));
+        const result = await dashboard.next(m => m.requestId === id);
+        assert.equal(result.success, false);
+        return result.error;
+    };
+    const relays = async (type, data) => {
+        dashboard.send(cmd(type, type, data));
+        const forwarded = await headset.next(m => m.type === 'command');
+        assert.equal(forwarded.commandType, type);
+        assert.deepEqual(forwarded.payload, data);
+        headset.send({ type: 'ack', commandId: forwarded.commandId, success: true });
+        assert.equal((await dashboard.next(m => m.requestId === type)).success, true);
+    };
+
+    await rejects('legacy', start, payload);
+    await publish({ active: false, canStart: false, status: 'TrackingLost' });
+    await rejects('untracked', start, payload);
+    await publish({ active: false, canStart: true, status: 'Idle' });
+    await rejects('empty', start, { steps: [] });
+    await rejects('too-many', start, { steps: Array(21).fill(payload.steps[0]) });
+    await rejects('invalid-duration', start, { steps: [{ animationId: 'Mixamo_AirSquat', seconds: 0 }] });
+    await rejects('unknown-exercise', start, { steps: [{ animationId: 'Other', seconds: 8 }] });
+    await rejects('idle-skip', 'exercise.nextWarmup', {});
+    await relays(start, payload);
+    await publish({ active: true, canStart: false, status: 'Playing' });
+    await rejects('already-running', start, payload);
+    const settings = { paceMinutesPerKilometre: 6, spawnLane: 1, distanceBehindStartLine: 0.5 };
+    assert.match(await rejects('run-while-warming-up', 'run.start', settings), /Beende zuerst das Warm-up/);
+    assert.match(await rejects('belt-while-warming-up', 'treadmill.startRun', { ...settings, deviceId: 'belt' }), /Beende zuerst das Warm-up/);
+    await relays('exercise.nextWarmup', {});
+    await relays('exercise.stopWarmup', {});
+    await publish({ active: false, canStart: true, status: 'Stopped' });
+    await relays('run.start', settings);
+});
