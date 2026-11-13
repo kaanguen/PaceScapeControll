@@ -26,8 +26,13 @@ export const commands = {
         ['Track', 'TreadmillRelative'].includes(p.presentationMode) &&
         (range(p.sideOffsetMetres, -5, -0.5) || range(p.sideOffsetMetres, 0.5, 5)) &&
         range(p.visibilityDistanceMetres, 1, 100),
-    'runner.calibrate': p => Object.keys(p).length === 0,
-    'runner.mode': p => ['FixedPace', 'AllTimePersonalBest'].includes(p.runnerMode) && Object.keys(p).length === 1,
+    'runner.calibrate': p => Object.keys(p).length === 0 ||
+        (Object.keys(p).length === 1 && typeof p.reverseDirection === 'boolean'),
+    'runner.setup': p => Object.keys(p).length === 2 &&
+        ['Stadium', 'FTMS', 'Manual'].includes(p.runEnvironment) &&
+        ['FixedPace', 'AllTimePersonalBest', 'SideBySide'].includes(p.ghostMode) &&
+        (p.runEnvironment !== 'Stadium' || p.ghostMode !== 'SideBySide'),
+    'runner.mode': p => ['FixedPace', 'AllTimePersonalBest', 'Stadium', 'SideBySide', 'Manual'].includes(p.runnerMode) && Object.keys(p).length === 1,
     'treadmill.scan': p => Object.keys(p).length === 0,
     'treadmill.scan.stop': p => Object.keys(p).length === 0,
     'treadmill.connect': p => typeof p.deviceId === 'string' && p.deviceId.trim().length > 0 && p.deviceId.length <= 256 && Object.keys(p).length === 1,
@@ -46,6 +51,7 @@ export const commands = {
     'run.pause': p => Object.keys(p).length === 0,
     'run.resume': p => Object.keys(p).length === 0,
     'run.reset': p => Object.keys(p).length === 0,
+    'runner.trackSpeed': p => Object.keys(p).length === 1 && range(p.manualTrackSpeedKmh, 1, 30),
     'runner.pace': p => range(p.paceMinutesPerKilometre, 0.1, 60),
     'runner.spawn': p => Number.isInteger(p.spawnLane) && range(p.spawnLane, 1, 8) && range(p.distanceBehindStartLine, 0, 1000),
     'tracking.configure': p => range(p.markerLength, 0.001, 10) && range(p.startupTimeoutSeconds, 1, 300) && Number.isInteger(p.maxTrackedMarkers) && range(p.maxTrackedMarkers, 1, 64),
@@ -168,9 +174,40 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000, allo
                         return reject('Die verbundene App unterstützt die Ghost-Darstellung nicht.');
                     }
                     if (state.runState !== 'Ready') return reject('Setze den Lauf vor dem Wechsel oder Kalibrieren zurück.');
-                    if (m.commandType === 'runner.calibrate' && (state.ghostPresentation?.mode !== 'TreadmillRelative' ||
+                    if (m.commandType === 'runner.calibrate' && Object.hasOwn(m.payload, 'reverseDirection') &&
+                        typeof state.ghostPresentation?.reverseDirection !== 'boolean') {
+                        return reject('Für die Laufrichtung die aktualisierte Brillen-App verbinden.');
+                    }
+                    if (m.commandType === 'runner.calibrate' && (!['TreadmillRelative', 'SideBySide', 'Manual'].includes(state.ghostPresentation?.mode) ||
                         state.placedMarkers !== 1 || state.runnableMarkers !== 1)) {
-                        return reject('Für die Kalibrierung brauchst du den Laufbandmodus und genau einen getrackten Marker.');
+                        return reject('Für die Kalibrierung brauchst du eine relative Darstellung und genau einen getrackten Marker.');
+                    }
+                }
+                if (m.commandType === 'runner.trackSpeed' && (state.manualTrackSpeedVersion !== 1 ||
+                    (state.runEnvironment !== 'Manual' && state.runnerMode !== 'Manual'))) {
+                    return reject('Virtuelles Laufbandtempo benötigt die aktualisierte App im Laufbandsetting ohne FTMS.');
+                }
+                if (m.commandType === 'runner.setup') {
+                    if (state.runSetupVersion !== 1 || state.testScene || state.isSimulation) {
+                        return reject('Die verbundene App unterstützt die Laufsettings nicht.');
+                    }
+                    if (state.runState !== 'Ready' || (m.payload.runEnvironment !== 'Stadium' &&
+                        state.placedMarkers + state.pendingMarkers > 1)) {
+                        return reject('Setze den Lauf zurück und verwende im Laufbandsetting höchstens einen Marker.');
+                    }
+                }
+                if (m.commandType === 'runner.mode') {
+                    const mode = m.payload.runnerMode;
+                    const companion = mode === 'Manual' || mode === 'SideBySide';
+                    if (companion && (state.testScene || state.isSimulation ||
+                        (mode === 'Manual' ? state.manualModeVersion !== 1 : state.sideBySideVersion !== 1))) {
+                        return reject('Dieser Laufbandmodus benötigt eine aktualisierte App mit Tracking.');
+                    }
+                    if ((companion || mode === 'Stadium') && state.runState !== 'Ready') {
+                        return reject('Setze den Lauf vor dem Moduswechsel zurück.');
+                    }
+                    if (companion && state.placedMarkers + state.pendingMarkers > 1) {
+                        return reject('Der Laufbandmodus benötigt höchstens einen Marker.');
                     }
                 }
                 if (m.commandType === 'runner.mode' && state.ghostControlVersion !== 1) return reject('Für die Ghost-Steuerung die aktualisierte App neu bauen und installieren.');
@@ -187,6 +224,10 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000, allo
                 const resumesBelt = m.commandType === 'treadmill.resumeRun';
                 const slowsBelt = m.commandType === 'treadmill.pauseRun' || m.commandType === 'treadmill.stopRun';
                 const setsBeltSpeed = m.commandType === 'treadmill.speed';
+                if ((startsBelt || resumesBelt) && (state.runnerMode === 'Manual' ||
+                    (state.runSetupVersion === 1 && state.runEnvironment !== 'FTMS'))) {
+                    return reject('Im manuellen Modus startet nur die virtuelle Bahn.');
+                }
                 if (startsBelt || resumesBelt || slowsBelt || setsBeltSpeed) {
                     const belt = state.treadmill;
                     const requiredVersion = resumesBelt || slowsBelt ? 4 : 3;
@@ -211,7 +252,7 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000, allo
                 }
                 if (pending.size) return reject('Ein Befehl wartet auf Bestätigung.');
                 const commandId = randomUUID();
-                const timer = setTimeout(() => finish(commandId, false, 'Keine Bestätigung. Zustand prüfen; Befehl wird nicht wiederholt.'), commandTimeout);
+                const timer = setTimeout(() => finish(commandId, false, 'Keine Bestätigung. Zustand prüfen; Befehl wird nicht wiederholt.'), commandTimeout + (startsBelt ? 3000 : 0));
                 timer.unref(); pending.set(commandId, { ws, requestId: m.requestId, timer });
                 send(headset, { type: 'command', commandId, commandType: m.commandType, payload: m.payload }); broadcast();
             } catch (error) { send(ws, { type: 'error', error: error.message }); }

@@ -55,9 +55,9 @@
                 <p id="beltSpeedHelp" class="help">Laufbandsteuerung benötigt die USB- oder WLAN-Freigabe.</p>
             </fieldset>
         </section><section class="panel session-performance" aria-labelledby="sessionPerformanceTitle"><div class="panel-top"><h2 id="sessionPerformanceTitle">Deine Bestzeiten</h2><span id="sessionPrBadge" class="badge">Noch kein Ergebnis</span></div><div class="session-results"><div><span>Beste Sessionzeit <small id="sessionResultDistance">—</small></span><strong id="sessionBestValue">—</strong></div><div><span>All-time PR</span><strong id="sessionPrValue">—</strong></div></div><p id="sessionPrStatus" class="help" role="status">Verbinde dein Laufband für gemessene Zeiten.</p><div class="performance-table"><table><caption class="sr-only">Gemessene Bestzeiten je Distanz</caption><thead><tr><th>Distanz</th><th>Diese Session</th><th>All-time</th></tr></thead><tbody id="sessionDistanceTimes"><tr><td colspan="3">Noch keine gemessenen Zeiten</td></tr></tbody></table></div><a class="speed-settings-link" href="#analysis">Alle Runden und Bestzeiten ↗</a></section></div><aside class="dashboard-stats" aria-label="Trainingswerte"><section class="stats-panel" aria-label="Session-Kennzahlen"><div class="metrics"><div class="metric-card"><div class="metric-top"><span class="metric-label">Tempo Ghost</span><span class="metric-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m4 15 5-5 4 3 7-9M15 4h5v5"/></svg></span></div><p><strong id="speedValue">—</strong><span>km/h</span></p><span class="metric-foot"><i></i><span id="paceValue">—</span> min/km</span></div><div class="metric-card">
-    <div class="metric-top"><span class="metric-label">Deine Geschwindigkeit</span></div>
+    <div class="metric-top"><span id="userSpeedLabel" class="metric-label">Deine Geschwindigkeit</span></div>
     <p><strong id="userSpeedValue">—</strong><span>km/h</span></p>
-    <span class="metric-foot"><i></i>Live vom Laufband</span>
+    <span class="metric-foot"><i></i><span id="userSpeedSource">Live vom Laufband</span></span>
 </div>
 <div class="metric-card"><div class="metric-top"><span class="metric-label">Laufzeit</span><span class="metric-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M9 2h6m-3 3v3m0 5 3-3"/></svg></span></div><p><strong id="runTimeValue">—</strong><span>min:sek</span></p><span class="metric-foot"><i></i>Aktuelle Session</span></div><div class="metric-card"><div class="metric-top"><span class="metric-label">Laufspur</span><span class="metric-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V4m7 16V4m7 16V4M3 8h18M3 16h18"/></svg></span></div><p><strong id="activeLane">—</strong><span>/ 8</span></p><span class="metric-foot"><i></i>Bestätigte Platzierung</span></div></div></section><section class="panel mini-track-panel" aria-labelledby="miniTrackTitle">
     <div class="panel-top"><h2 id="miniTrackTitle">Deine Runde</h2><span id="miniTrackDistance" class="micro-label">—</span></div>
@@ -102,13 +102,33 @@
             </div>
         </section>
         <div id="configuration" class="app-view" hidden><div class="configuration-layout"><div class="configuration-fields"><div class="control-grid">
-            <section class="panel control-card runner-config"><div class="card-heading"><span class="card-index">01</span><h3>Ghost einstellen</h3></div><form id="runnerModeForm" class="live-speed"><fieldset disabled><legend>Ghost-Modus</legend><label for="runnerMode">Ghost-Tempo</label><select id="runnerMode"><option value="FixedPace">Ghost · voreingestelltes Tempo</option><option id="allTimeModeOption" value="AllTimePersonalBest" disabled>Ghost · All-time PRs</option></select><button class="secondary" type="submit">Modus übernehmen</button><p id="runnerModeHelp" class="help" role="status">Aktualisierte App verbinden. Ein Moduswechsel pausiert den Lauf und erhält die Position.</p></fieldset></form><form id="ghostPresentationForm" class="live-speed">
+            <section class="panel control-card runner-config"><div class="card-heading"><span class="card-index">01</span><h3>Ghost einstellen</h3></div><form id="runnerModeForm" class="live-speed">
                 <fieldset disabled>
-                    <legend>Ghost-Darstellung</legend>
-                    <label for="ghostPresentationMode">Umgebung</label>
-                    <select id="ghostPresentationMode"><option value="Track">Stadion</option><option value="TreadmillRelative">Laufband</option></select>
-                    <button type="submit" class="secondary">Darstellung übernehmen</button>
-                    <button id="calibrateGhostPresentation" type="button" class="secondary" hidden disabled>Laufbandplatz kalibrieren</button>
+                    <legend>Laufsetting</legend>
+                    <label for="runEnvironment">Umgebung</label>
+                    <select id="runEnvironment">
+                        <option value="FTMS">Laufband mit FTMS</option>
+                        <option value="Stadium" selected>Stadion</option>
+                        <option value="Manual">Laufband ohne FTMS</option>
+                    </select>
+                </fieldset>
+                <fieldset disabled>
+                    <legend>Laufbandmodus</legend>
+                    <label for="runnerMode">Verhalten des Ghosts</label>
+                    <select id="runnerMode" aria-describedby="runnerModeHelp">
+                        <option id="allTimeModeOption" value="AllTimePersonalBest">All-time PRs</option>
+                        <option id="sideBySideOption" value="SideBySide">Side by Side</option>
+                        <option id="fixedPaceOption" value="FixedPace" selected>Eingestelltes Tempo</option>
+                    </select>
+                    <p id="runnerModeHelp" class="help">Der Ghost läuft mit deinem eingestellten Tempo.</p>
+                    <button class="secondary" type="submit">Laufsetting und Modus übernehmen</button>
+                    <label id="calibrationDirectionLabel" for="calibrationDirection" hidden>Laufrichtung
+                        <select id="calibrationDirection" disabled>
+                            <option value="standard">Standardrichtung</option>
+                            <option value="reverse">Gegenrichtung</option>
+                        </select>
+                    </label>
+                    <button id="calibrateGhostPresentation" type="button" class="secondary" hidden disabled>Startplatz kalibrieren</button>
                 </fieldset>
                 <p id="ghostPresentationHelp" class="help" role="status">Warte auf die App.</p>
             </form>
