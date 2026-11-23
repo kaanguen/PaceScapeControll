@@ -64,7 +64,12 @@ if (-not $ServerOnly) {
         $candidates = @($BodyTrackingExe)
     }
     else {
-        $candidates = @(Join-Path (Split-Path -Parent $repo) 'PaceScapeBodyTrackingTest\build\bin\Release\PaceScapeBodyTrackingTest.exe')
+        $relativeExe = 'PaceScapeBodyTrackingTest\build\bin\Release\PaceScapeBodyTrackingTest.exe'
+        # Inside this repo first, then the older sibling-folder layout.
+        $candidates = @(
+            (Join-Path $repo $relativeExe),
+            (Join-Path (Split-Path -Parent $repo) $relativeExe)
+        )
     }
     foreach ($candidate in $candidates) {
         if ((Test-Path -LiteralPath $candidate) -and (Get-Item -LiteralPath $candidate).Length -gt 0) {
