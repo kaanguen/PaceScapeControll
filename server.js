@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createBodyPoseRoute, createBodyTrackingRoute } from './body-tracking.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -10,6 +11,9 @@ const hostIsLoopback = host => /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host ?? 
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const range = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
 const maxCameraFrameBytes = 2 * 1024 * 1024;
+// Transport limits for the relayed pose stream (about the 30 Hz camera rate), not training parameters.
+const bodyPoseIntervalMs = 30;
+const maxBodyPoseBacklog = 64 * 1024;
 const runnerSettings = p => range(p.paceMinutesPerKilometre, 0.1, 60) && Number.isInteger(p.spawnLane) && range(p.spawnLane, 1, 8) && range(p.distanceBehindStartLine, 0, 1000);
 const motorDevice = p => typeof p.deviceId === 'string' && p.deviceId.length > 0 && p.deviceId.length <= 256;
 const warmupExercises = new Set(['Mixamo_StartJumpingJacks', 'Mixamo_AirSquat']);
@@ -19,6 +23,8 @@ export const commands = {
             warmupExercises.has(step.animationId) && range(step.seconds, 1, 300)),
     'exercise.nextWarmup': p => Object.keys(p).length === 0,
     'exercise.stopWarmup': p => Object.keys(p).length === 0,
+    'bodyMirror.start': p => Object.keys(p).length === 0,
+    'bodyMirror.stop': p => Object.keys(p).length === 0,
     'camera.start': p => Object.keys(p).length === 0,
     'camera.stop': p => Object.keys(p).length === 0,
     'runner.comparison': p => Number.isInteger(p.comparisonDistanceMetres) && range(p.comparisonDistanceMetres, 1, 1000000) && typeof p.useDemoRecords === 'boolean' && Object.keys(p).length === 2,
@@ -68,7 +74,7 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000, allo
     const motorStartEnabled = ws => ws.localMotorDashboard === true && headset?.readyState === WebSocket.OPEN &&
         ((allowMotorStart && headset.localMotorHeadset && server.address()?.address === '127.0.0.1') ||
             (allowLanMotorControl && !headset.localMotorHeadset && state?.lanMotorControlEnabled === true));
-    const snapshot = ws => ({ type: 'status', ghostPresentationControlVersion: 1, motorStartEnabled: motorStartEnabled(ws), motorPauseStopEnabled: motorStartEnabled(ws), headsetConnected: headset?.readyState === WebSocket.OPEN, state, updatedAt: updatedAt || null, pending: pending.size });
+    const snapshot = ws => ({ type: 'status', bodyPoseReceivedAt: lastBodyPoseAt || null, ghostPresentationControlVersion: 1, motorStartEnabled: motorStartEnabled(ws), motorPauseStopEnabled: motorStartEnabled(ws), headsetConnected: headset?.readyState === WebSocket.OPEN, state, updatedAt: updatedAt || null, pending: pending.size });
     const broadcast = () => { for (const ws of dashboards) send(ws, snapshot(ws)); };
     const finish = (id, success, error = '') => {
         const item = pending.get(id);
@@ -77,11 +83,25 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000, allo
         send(item.ws, { type: 'ack', requestId: item.requestId, commandId: id, success, error });
         broadcast();
     };
+    const bodyTrackingRoute = createBodyTrackingRoute();
+    // Poses go only to a headset that has the mirror mode active; slow sockets drop poses instead of queueing.
+    let lastBodyPoseAt = 0, lastBodyPoseForwardAt = 0;
+    const bodyPoseRoute = createBodyPoseRoute(pose => {
+        const now = Date.now();
+        lastBodyPoseAt = now;
+        if (headset?.readyState !== WebSocket.OPEN || state?.bodyMirrorVersion !== 1 ||
+            state.bodyMirror?.active !== true || now - updatedAt > staleTimeout ||
+            now - lastBodyPoseForwardAt < bodyPoseIntervalMs || headset.bufferedAmount > maxBodyPoseBacklog) return;
+        lastBodyPoseForwardAt = now;
+        send(headset, { type: 'bodyPose', bodyPose: pose });
+    });
     const server = http.createServer(async (req, res) => {
         const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; connect-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'" };
-        const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/assets/session-track.jpg': ['assets/session-track.jpg', 'image/jpeg'] };
-        if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405, headers); res.end(); return; }
+        const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/body-tracking.js': ['body-tracking.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/assets/session-track.jpg': ['assets/session-track.jpg', 'image/jpeg'] };
         const path = new URL(req.url, 'http://localhost').pathname;
+        if (path === '/api/body-tracking/frame') return bodyTrackingRoute(req, res, headers);
+        if (path === '/api/body-tracking/pose') return bodyPoseRoute(req, res, headers);
+        if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405, headers); res.end(); return; }
         const asset = assets[path];
         if (!asset && path !== '/health') { res.writeHead(404, headers); res.end('Not found'); return; }
         try {
@@ -165,8 +185,24 @@ export function createService({ commandTimeout = 8000, staleTimeout = 5000, allo
                     }
                 }
                 if (state.warmup?.active === true &&
-                    ['run.start', 'run.resume', 'treadmill.startRun', 'treadmill.resumeRun'].includes(m.commandType)) {
+                    ['run.start', 'run.resume', 'treadmill.startRun', 'treadmill.resumeRun', 'bodyMirror.start'].includes(m.commandType)) {
                     return reject('Beende zuerst das Warm-up.');
+                }
+                if (m.commandType.startsWith('bodyMirror.')) {
+                    if (state.bodyMirrorVersion !== 1 || state.testScene || state.isSimulation) {
+                        return reject('Die verbundene App unterstützt Body Tracking nicht. Bitte neu bauen und installieren.');
+                    }
+                    if (m.commandType === 'bodyMirror.start') {
+                        if (state.runState !== 'Ready' || state.bodyMirror?.canStart !== true || state.bodyMirror.active) {
+                            return reject('Body Tracking braucht einen bereiten Lauf und genau einen getrackten Marker.');
+                        }
+                    } else if (state.bodyMirror?.active !== true) {
+                        return reject('Body Tracking ist nicht aktiv.');
+                    }
+                }
+                if (state.bodyMirror?.active === true &&
+                    ['run.start', 'run.resume', 'treadmill.startRun', 'treadmill.resumeRun', 'exercise.startWarmup'].includes(m.commandType)) {
+                    return reject('Beende zuerst das Body Tracking.');
                 }
                 if (m.commandType.startsWith('treadmill.') && state.treadmillControlVersion !== 1) return reject('Für die Laufband-Verbindung die aktualisierte App neu bauen und installieren.');
                 if (m.commandType === 'runner.presentation' || m.commandType === 'runner.calibrate') {

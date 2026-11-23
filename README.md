@@ -94,6 +94,8 @@ adb reverse tcp:8787 tcp:8787
 
 Danach die App starten. Sie verwendet standardmäßig `ws://127.0.0.1:8787/ws`. Ohne USB-Weiterleitung bezeichnet localhost auf der Brille die Brille selbst.
 
+**Mit Body Tracking (Windows, Femto Bolt):** `start-bodytracking.cmd` doppelklicken. Das Skript prüft Node.js, führt beim ersten Start `npm ci` aus, startet den Server (oder verwendet einen laufenden) und danach `PaceScapeBodyTrackingTest.exe --dashboard --avatar` in eigenen Fenstern und öffnet das Dashboard. Die EXE wird standardmäßig im Nachbarordner `..\PaceScapeBodyTrackingTest\build\bin\Release\` erwartet (vorher dort mit `build.ps1` bauen). Ein anderer Ort wird mit `start-bodytracking.cmd -BodyTrackingExe "C:\Pfad\PaceScapeBodyTrackingTest.exe"` oder der Umgebungsvariable `PACESCAPE_BODYTRACKING_EXE` angegeben; `-ServerOnly` startet nur den Server, `-NoDashboardStream` sendet nur Avatar-Posen.
+
 **Ohne Brille ausprobieren:** In einem zweiten Terminal `npm run simulate` starten. Die Test-Brille ist im Dashboard als Simulation gekennzeichnet und muss vor dem Verbinden des echten Geräts beendet werden. `npm test` führt die Server-Tests aus; Strg+C beendet den jeweiligen Prozess.
 
 USB-Einrichtung, WLAN-Betrieb ohne Zugriffsschlüssel und Fehlerverhalten sind in der **[Einrichtungsanleitung](docs/setup.md)** beschrieben. Lokales `ws://` ist unverschlüsselt; für WLAN ein vertrauenswürdiges Netz ohne öffentliche Portfreigabe verwenden.

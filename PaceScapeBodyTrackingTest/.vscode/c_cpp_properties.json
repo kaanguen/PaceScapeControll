@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "PaceScapeBodyTrackingTest x64",
+            "compilerPath": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe",
+            "intelliSenseMode": "windows-msvc-x64",
+            "cppStandard": "c++17",
+            "includePath": [
+                "${workspaceFolder}/vendor/includes",
+                "${workspaceFolder}/vendor/window_controller_3d",
+                "${workspaceFolder}/packages/Microsoft.Azure.Kinect.Sensor.1.4.1/build/native/include",
+                "${workspaceFolder}/packages/Microsoft.Azure.Kinect.BodyTracking.1.1.2/build/native/include",
+                "${workspaceFolder}/packages/glfw.3.3.0/build/native/include"
+            ]
+        }
+    ],
+    "version": 4
+}
+

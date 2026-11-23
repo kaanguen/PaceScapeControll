@@ -132,3 +132,15 @@ The relay uses the regular acknowledgement flow. Progress comes from the client.
 An active warm-up blocks both ghost and treadmill run starts or resumes.
 An interruption reports `TrackingLost`, `ConnectionLost`, or `ViewUnavailable` when the avatar cannot be displayed.
 Warm-up needs no treadmill control and is also available in the labelled simulator.
+
+## Body-tracking avatar mirror version 1
+
+Tracking clients advertise `bodyMirrorVersion: 1` and `bodyMirror: { active, canStart, status, hasPose, poseAgeSeconds }`. Status is `Stopped`, `WaitingForPose`, `Mirroring`, `TrackingLost` or `ConnectionLost`.
+
+- `bodyMirror.start` and `bodyMirror.stop` accept exactly `{}` and use the regular acknowledgement flow. Start requires `runState: "Ready"`, no active warm-up and `bodyMirror.canStart: true` (exactly one tracked placement). While active, run starts/resumes and warm-up are rejected.
+- `PaceScapeBodyTrackingTest.exe --avatar` posts the closest body at up to 30 Hz to `POST /api/body-tracking/pose` (loopback only, `Content-Type: application/json`, no `Origin`, ≤ 16 KiB): `{ "bodyId": 1, "rotations": [x, y, z, w × 32], "confidence": [32 × 0–3] }`. Rotations are the Azure Kinect SDK absolute joint orientations in depth-camera space.
+- `GET /api/body-tracking/pose` (loopback only, no `Origin`) returns the newest pose as JSON, or 204 when none is younger than 0.5 s. It is independent of the headset relay and serves the Unity Editor **PaceScape > Body-Tracking-Vorschau**.
+- The relay forwards `{"type":"bodyPose","bodyPose":{...}}` to the headset only while its fresh state reports `bodyMirror.active: true`, at most every 30 ms and only while the headset socket backlog is below 64 KiB. Poses are never stored or replayed; dashboards receive only `bodyPoseReceivedAt` (server time) in status.
+- Unity keeps only the newest pose outside the command queue and sends no acknowledgement. The placed avatar stays at its placement (marker start pose or calibrated treadmill point) and mirrors the pose same-sided. A slowly followed pelvis heading (1 s) aligns the avatar with its placement; the lower foot is kept on the floor plane, so flight phases are not reproduced. Poses older than 0.5 s are ignored and the avatar returns to its Animator idle pose.
+
+Tracking loss, connection loss and reset end the mode. Hardware behaviour (Femto Bolt, Magic Leap 2) and the visual correctness of the retargeting with real poses are not yet verified.

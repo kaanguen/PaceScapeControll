@@ -4,7 +4,7 @@ let queuedPace = null, paceTimer, selectedPace = 6;
 let cameraFrameUrl = null, cameraFrameAt = 0;
 const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
 $('siteUrl').textContent = location.origin; $('wsUrl').textContent = wsUrl;
-const names = { 'runner.trackSpeed': 'Virtuelles Laufbandtempo übernehmen', 'runner.setup': 'Laufsetting und Modus übernehmen', 'exercise.startWarmup': 'Warm-up starten', 'exercise.nextWarmup': 'Übung überspringen', 'exercise.stopWarmup': 'Warm-up beenden', 'camera.start': 'Kamera starten', 'camera.stop': 'Kamera stoppen', 'runner.comparison': 'Vergleichsdistanz ändern', 'runner.mode': 'Läufermodus ändern', 'runner.presentation': 'Ghost-Darstellung ändern', 'runner.calibrate': 'Laufbandplatz kalibrieren', 'treadmill.pauseRun': 'Lauf und Laufband pausieren', 'treadmill.stopRun': 'Lauf beenden und Laufband stoppen', 'treadmill.resumeRun': 'Lauf und Laufband fortsetzen', 'treadmill.startRun': 'Lauf und Laufband starten', 'treadmill.speed': 'Laufbandtempo übernehmen', 'treadmill.readSpeedRange': 'Tempobereich abfragen', 'treadmill.scan': 'Bluetooth suchen', 'treadmill.scan.stop': 'Suche stoppen', 'treadmill.connect': 'Laufband verbinden', 'treadmill.disconnect': 'Laufband trennen', 'runner.create': 'Läufer spawnen', 'runner.remove': 'Läufer entfernen', 'runner.configure': 'Läufer einstellen', 'run.start': 'Lauf starten', 'run.pause': 'Lauf pausieren', 'run.resume': 'Weiterlaufen', 'run.reset': 'Lauf zurücksetzen', 'runner.pace': 'Pace ändern', 'runner.spawn': 'Startposition ändern', 'tracking.start': 'Tracking starten', 'tracking.stop': 'Tracking stoppen', 'tracking.retry': 'Tracking neu starten', 'tracking.configure': 'Erkennung konfigurieren', 'placement.configure': 'Platzierung konfigurieren' };
+const names = { 'bodyMirror.start': 'Avatar-Body-Tracking starten', 'bodyMirror.stop': 'Avatar-Body-Tracking beenden', 'runner.trackSpeed': 'Virtuelles Laufbandtempo übernehmen', 'runner.setup': 'Laufsetting und Modus übernehmen', 'exercise.startWarmup': 'Warm-up starten', 'exercise.nextWarmup': 'Übung überspringen', 'exercise.stopWarmup': 'Warm-up beenden', 'camera.start': 'Kamera starten', 'camera.stop': 'Kamera stoppen', 'runner.comparison': 'Vergleichsdistanz ändern', 'runner.mode': 'Läufermodus ändern', 'runner.presentation': 'Ghost-Darstellung ändern', 'runner.calibrate': 'Laufbandplatz kalibrieren', 'treadmill.pauseRun': 'Lauf und Laufband pausieren', 'treadmill.stopRun': 'Lauf beenden und Laufband stoppen', 'treadmill.resumeRun': 'Lauf und Laufband fortsetzen', 'treadmill.startRun': 'Lauf und Laufband starten', 'treadmill.speed': 'Laufbandtempo übernehmen', 'treadmill.readSpeedRange': 'Tempobereich abfragen', 'treadmill.scan': 'Bluetooth suchen', 'treadmill.scan.stop': 'Suche stoppen', 'treadmill.connect': 'Laufband verbinden', 'treadmill.disconnect': 'Laufband trennen', 'runner.create': 'Läufer spawnen', 'runner.remove': 'Läufer entfernen', 'runner.configure': 'Läufer einstellen', 'run.start': 'Lauf starten', 'run.pause': 'Lauf pausieren', 'run.resume': 'Weiterlaufen', 'run.reset': 'Lauf zurücksetzen', 'runner.pace': 'Pace ändern', 'runner.spawn': 'Startposition ändern', 'tracking.start': 'Tracking starten', 'tracking.stop': 'Tracking stoppen', 'tracking.retry': 'Tracking neu starten', 'tracking.configure': 'Erkennung konfigurieren', 'placement.configure': 'Platzierung konfigurieren' };
 const warmupExercises = new Map([
     ['Mixamo_StartJumpingJacks', 'Hampelmänner'],
     ['Mixamo_AirSquat', 'Kniebeugen']
@@ -76,7 +76,30 @@ function controls() {
     renderMiniTrack();
     renderCameraControls();
     renderWarmup();
+    renderBodyMirror();
 }
+function renderBodyMirror() {
+    const state = fresh() ? snapshot.state : null;
+    const supported = state?.bodyMirrorVersion === 1 && !state.testScene && !state.isSimulation;
+    const mirror = supported ? state.bodyMirror : null;
+    const active = mirror?.active === true;
+    // Both timestamps use the server clock, so a remote dashboard clock does not matter.
+    const poseArriving = Number.isFinite(snapshot?.bodyPoseReceivedAt) &&
+        snapshot.updatedAt - snapshot.bodyPoseReceivedAt < 2000;
+    $('bodyMirrorControls').disabled = !supported || Boolean(pending) || Boolean(snapshot?.pending);
+    $('startBodyMirror').hidden = active;
+    $('startBodyMirror').disabled = !active && mirror?.canStart !== true;
+    $('stopBodyMirror').hidden = !active;
+    const ended = { TrackingLost: 'Beendet: Marker oder Brille nicht mehr getrackt.', ConnectionLost: 'Beendet: Verbindung unterbrochen.' };
+    $('bodyMirrorStatus').textContent = !state ? 'Aktualisierte Brillen-App verbinden.'
+        : !supported ? 'Für Body Tracking die aktualisierte Brillen-App installieren.'
+        : active ? (mirror.status === 'Mirroring' ? 'Avatar folgt deiner Bewegung.'
+            : poseArriving ? 'Pose kommt an. Warte auf die Brille …' : 'Warte auf Posen der Femto Bolt (EXE mit --avatar).')
+        : mirror?.canStart ? (ended[mirror.status] ? `${ended[mirror.status]} Neu starten möglich.` : 'Bereit · Avatar steht am Marker.')
+        : ended[mirror?.status] || 'Braucht einen bereiten Lauf und genau einen getrackten Marker.';
+}
+$('startBodyMirror').onclick = () => command('bodyMirror.start', {});
+$('stopBodyMirror').onclick = () => command('bodyMirror.stop', {});
 function usesManualTrackSpeed(state = snapshot?.state) {
     return state?.runEnvironment === 'Manual' || state?.runnerMode === 'Manual';
 }
